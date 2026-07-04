@@ -122,20 +122,44 @@ private struct BusyGlyph: View {
 
 private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
+    @State private var zoomScale: CGFloat = 1
+    @State private var baseZoomScale: CGFloat = 1
+    @State private var panOffset: CGSize = .zero
+    private let videoSize = CGSize(width: 520, height: 292)
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ZStack {
-                if let player = model.player {
-                    PlayerSurface(player: player)
-                } else if let rtmpPlayer = model.rtmpPlayer {
-                    RTMPPlayerSurface(player: rtmpPlayer)
-                } else {
-                    PlaceholderVideoView(message: model.streamStatusText)
+                ZStack {
+                    if let player = model.player {
+                        PlayerSurface(player: player)
+                    } else if let rtmpPlayer = model.rtmpPlayer {
+                        RTMPPlayerSurface(player: rtmpPlayer)
+                    } else {
+                        PlaceholderVideoView(message: model.streamStatusText)
+                    }
                 }
+                .frame(width: videoSize.width, height: videoSize.height)
+                .scaleEffect(zoomScale)
+                .offset(panOffset)
+
+                TrackpadPanView(zoomScale: $zoomScale, panOffset: $panOffset, videoSize: videoSize)
             }
-            .frame(width: 520, height: 292)
+            .frame(width: videoSize.width, height: videoSize.height)
             .background(Color.black)
+            .clipped()
+            .gesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        zoomScale = min(max(baseZoomScale * value, 1), 4)
+                        panOffset = clampedOffset(panOffset, scale: zoomScale)
+                    }
+                    .onEnded { value in
+                        zoomScale = min(max(baseZoomScale * value, 1), 4)
+                        baseZoomScale = zoomScale
+                        panOffset = clampedOffset(panOffset, scale: zoomScale)
+                    }
+            )
 
             VStack {
                 HStack(alignment: .top) {
@@ -196,6 +220,85 @@ private struct MonitorView: View {
         }
         .frame(width: 520, height: 292)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func clampedOffset(_ offset: CGSize, scale: CGFloat) -> CGSize {
+        guard scale > 1 else {
+            return .zero
+        }
+
+        let maxX = videoSize.width * (scale - 1) / 2
+        let maxY = videoSize.height * (scale - 1) / 2
+
+        return CGSize(
+            width: min(max(offset.width, -maxX), maxX),
+            height: min(max(offset.height, -maxY), maxY)
+        )
+    }
+}
+
+private struct TrackpadPanView: NSViewRepresentable {
+    @Binding var zoomScale: CGFloat
+    @Binding var panOffset: CGSize
+    let videoSize: CGSize
+
+    func makeNSView(context: Context) -> TrackpadPanNSView {
+        let view = TrackpadPanNSView()
+        view.onPan = { delta in
+            guard zoomScale > 1 else {
+                panOffset = .zero
+                return
+            }
+
+            let candidate = CGSize(
+                width: panOffset.width + delta.width,
+                height: panOffset.height + delta.height
+            )
+            panOffset = clampedOffset(candidate)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: TrackpadPanNSView, context: Context) {
+        nsView.onPan = { delta in
+            guard zoomScale > 1 else {
+                panOffset = .zero
+                return
+            }
+
+            let candidate = CGSize(
+                width: panOffset.width + delta.width,
+                height: panOffset.height + delta.height
+            )
+            panOffset = clampedOffset(candidate)
+        }
+    }
+
+    private func clampedOffset(_ offset: CGSize) -> CGSize {
+        let maxX = videoSize.width * (zoomScale - 1) / 2
+        let maxY = videoSize.height * (zoomScale - 1) / 2
+
+        return CGSize(
+            width: min(max(offset.width, -maxX), maxX),
+            height: min(max(offset.height, -maxY), maxY)
+        )
+    }
+}
+
+private final class TrackpadPanNSView: NSView {
+    var onPan: ((CGSize) -> Void)?
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard event.hasPreciseScrollingDeltas else {
+            nextResponder?.scrollWheel(with: event)
+            return
+        }
+
+        onPan?(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
     }
 }
 
