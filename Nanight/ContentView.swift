@@ -142,9 +142,7 @@ private struct MonitorView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.activeCamera?.name ?? "No camera")
                             .font(.headline.weight(.semibold))
-                        Text(model.statusLabel)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.72))
+                        LiveStatusRow()
                     }
                     .foregroundStyle(.white)
                     .shadow(radius: 3)
@@ -171,19 +169,9 @@ private struct MonitorView: View {
                     OverlayButton(
                         systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                         help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
+                        foregroundColor: model.isAudioMuted ? .red : .white,
                         action: model.toggleAudio
                     )
-
-                    OverlayButton(
-                        systemName: model.videoPaused ? "play.fill" : "pause.fill",
-                        help: model.videoPaused ? "Resume video" : "Pause video",
-                        action: model.toggleVideo
-                    )
-                    .disabled(model.player == nil && model.rtmpPlayer == nil)
-
-                    OverlayButton(systemName: "arrow.clockwise", help: "Reconnect stream") {
-                        model.reconnectStream()
-                    }
 
                     Spacer()
 
@@ -208,6 +196,31 @@ private struct MonitorView: View {
         }
         .frame(width: 520, height: 292)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct LiveStatusRow: View {
+    private let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "hh:mm a"
+        return formatter
+    }()
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 6, height: 6)
+
+                Text("Live")
+
+                Text(formatter.string(from: context.date))
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.78))
+        }
     }
 }
 
@@ -287,13 +300,14 @@ private struct ActivityDot: View {
 private struct OverlayButton: View {
     let systemName: String
     let help: String
+    var foregroundColor: Color = .white
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(foregroundColor)
                 .frame(width: 30, height: 30)
                 .background(Color.black.opacity(0.42))
                 .clipShape(Circle())
@@ -367,8 +381,6 @@ struct SettingsView: View {
 
             Section("Monitoring") {
                 Toggle("Start monitoring on launch", isOn: $model.settings.startMonitoringOnLaunch)
-                Toggle("Start muted", isOn: $model.settings.startMuted)
-                Toggle("Background audio enabled", isOn: $model.settings.backgroundAudioEnabled)
                 Toggle("Motion menu bar state", isOn: $model.settings.motionMenuBarStateEnabled)
                 Toggle("Sound menu bar state", isOn: $model.settings.soundMenuBarStateEnabled)
 

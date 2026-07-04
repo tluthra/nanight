@@ -9,8 +9,7 @@ final class NanightAppModel: ObservableObject {
     @Published var settings: NanitUserSettings {
         didSet {
             settings.save()
-            player?.isMuted = isAudioMuted
-            rtmpPlayer?.updateMuted(isAudioMuted)
+            applyAudioPlaybackState()
         }
     }
     @Published var email: String = ""
@@ -24,7 +23,7 @@ final class NanightAppModel: ObservableObject {
     @Published var player: AVPlayer?
     @Published var rtmpPlayer: NanightRTMPPlayer?
     @Published var videoPaused = false
-    @Published var audioMuted = true
+    @Published var audioMuted = false
     @Published var lastEventRefreshAt: Date?
     @Published var lastCameraRefreshAt: Date?
     @Published var cameraStatusText: String = "Not connected"
@@ -42,6 +41,7 @@ final class NanightAppModel: ObservableObject {
     private var lastNotifiedMotionAt: Date?
     private var lastNotifiedSoundAt: Date?
     private var wasOffline = false
+    private var isVideoVisible = false
 
     convenience init() {
         self.init(
@@ -60,7 +60,6 @@ final class NanightAppModel: ObservableObject {
         self.keychain = keychain
         self.notifications = notifications
         self.settings = NanitUserSettings.load()
-        self.audioMuted = settings.startMuted
 
         NanightLog.info("App launched")
 
@@ -135,7 +134,11 @@ final class NanightAppModel: ObservableObject {
     }
 
     var isAudioMuted: Bool {
-        audioMuted || settings.startMuted
+        audioMuted
+    }
+
+    private var isPlaybackAudioMuted: Bool {
+        audioMuted || !isVideoVisible
     }
 
     func restoreSession() async {
@@ -306,9 +309,23 @@ final class NanightAppModel: ObservableObject {
     func toggleAudio() {
         audioMuted.toggle()
         NanightLog.info(isAudioMuted ? "Audio muted" : "Audio unmuted")
-        settings.startMuted = audioMuted
-        player?.isMuted = isAudioMuted
-        rtmpPlayer?.updateMuted(isAudioMuted)
+        applyAudioPlaybackState()
+    }
+
+    func setVideoVisible(_ visible: Bool) {
+        guard isVideoVisible != visible else {
+            return
+        }
+
+        isVideoVisible = visible
+        NanightLog.info(visible ? "Video popover opened" : "Video popover closed; muting audio playback")
+        applyAudioPlaybackState()
+    }
+
+    private func applyAudioPlaybackState() {
+        let muted = isPlaybackAudioMuted
+        player?.isMuted = muted
+        rtmpPlayer?.updateMuted(muted)
     }
 
     func requestNotificationPermission() {
@@ -502,7 +519,7 @@ final class NanightAppModel: ObservableObject {
             player = nil
             let playback = rtmpPlayer ?? NanightRTMPPlayer()
             rtmpPlayer = playback
-            playback.start(url: url, muted: isAudioMuted, paused: videoPaused)
+            playback.start(url: url, muted: isPlaybackAudioMuted, paused: videoPaused)
             streamStatusText = playback.readyStateText
             NanightLog.info("Prepared HaishinKit playback for \(url.scheme ?? "unknown") stream")
             return
@@ -513,7 +530,7 @@ final class NanightAppModel: ObservableObject {
         streamStatusText = "Connecting stream"
         let item = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: item)
-        newPlayer.isMuted = isAudioMuted
+        newPlayer.isMuted = isPlaybackAudioMuted
         player = newPlayer
 
         if !videoPaused {

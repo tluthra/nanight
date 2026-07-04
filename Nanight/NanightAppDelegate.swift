@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-final class NanightAppDelegate: NSObject, NSApplicationDelegate {
+final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @MainActor let model = NanightAppModel()
 
     private var statusItem: NSStatusItem?
@@ -35,8 +35,10 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        button.image = NSImage(systemSymbolName: model.menuBarSystemImage, accessibilityDescription: "Nanight")
-        button.contentTintColor = statusColor
+        let image = NSImage(systemSymbolName: model.menuBarSystemImage, accessibilityDescription: "Nanight")
+        image?.isTemplate = true
+        button.image = image
+        button.contentTintColor = nil
     }
 
     @objc
@@ -60,9 +62,16 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 520, height: 320)
+        popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: NanightMenuView(model: model))
         self.popover = popover
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        model.setVideoVisible(true)
+    }
+
+    @MainActor
+    func popoverDidClose(_ notification: Notification) {
+        model.setVideoVisible(false)
     }
 
     @MainActor
@@ -72,7 +81,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refreshAccount), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: model.isAudioMuted ? "Unmute" : "Mute", action: #selector(toggleAudio), keyEquivalent: "m"))
-        menu.addItem(NSMenuItem(title: model.videoPaused ? "Resume Video" : "Pause Video", action: #selector(toggleVideo), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: ""))
@@ -105,12 +113,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     @MainActor
-    private func toggleVideo() {
-        model.toggleVideo()
-    }
-
-    @objc
-    @MainActor
     private func openSettings() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -127,15 +129,4 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    @MainActor
-    private var statusColor: NSColor {
-        switch model.connectionState {
-        case .offline, .authExpired:
-            return .systemOrange
-        case .signedIn:
-            return .systemGreen
-        case .mfaRequired, .restoring, .signedOut:
-            return .labelColor
-        }
-    }
 }

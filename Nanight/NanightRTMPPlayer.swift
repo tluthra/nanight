@@ -100,9 +100,7 @@ final class NanightRTMPPlayer: ObservableObject {
             let newConnection = RTMPConnection(flashVer: "MAC 9,0,124,2")
             let newStream = RTMPStream(connection: newConnection)
 
-            if let view {
-                await newStream.addOutput(view)
-            }
+            await attachVideoView(to: newStream)
             await newStream.attachAudioPlayer(audioPlayer)
             await newStream.setSoundTransform(SoundTransform(volume: isMuted ? 0 : 1))
 
@@ -114,6 +112,7 @@ final class NanightRTMPPlayer: ObservableObject {
             NanightLog.info("HaishinKit RTMPS connection opened")
 
             _ = try await newStream.play(target.streamName)
+            await attachVideoView(to: newStream)
             readyStateText = "RTMPS stream open"
             NanightLog.info("HaishinKit RTMPS playback connected")
         } catch {
@@ -143,6 +142,16 @@ final class NanightRTMPPlayer: ObservableObject {
                 }
             }
         ]
+    }
+
+    private func attachVideoView(to stream: RTMPStream) async {
+        guard let view else {
+            NanightLog.info("HaishinKit video view not ready yet")
+            return
+        }
+
+        await stream.addOutput(view)
+        NanightLog.info("HaishinKit video view attached to RTMPS stream")
     }
 }
 
@@ -174,8 +183,7 @@ extension NanightRTMPPlayer: PiPHKViewRepresentable.PreviewSource {
         Task { @MainActor in
             self.view = view
             if let stream = self.stream {
-                await stream.addOutput(view)
-                NanightLog.info("HaishinKit video view attached to RTMPS stream")
+                await self.attachVideoView(to: stream)
             }
         }
     }
