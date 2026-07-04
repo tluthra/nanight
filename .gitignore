@@ -1,0 +1,26 @@
+.DS_Store
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
+
+# Build output
+DerivedData/
+build/
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# SwiftPM generated Xcode projects
+Package.xcworkspace/
+
+# Local environment
+.env
+.env.*
