@@ -12,7 +12,6 @@ It is not affiliated with, endorsed by, or supported by Nanit.
 - Audio while the video popover is open
 - Mute control
 - Motion and sound activity indicators
-- Pinch to zoom and two-finger pan on the video
 - Basic macOS notifications for activity
 
 ## Requirements

@@ -24,9 +24,6 @@ final class NanightAppModel: ObservableObject {
     @Published var rtmpPlayer: NanightRTMPPlayer?
     @Published var videoPaused = false
     @Published var audioMuted = false
-    @Published var videoZoomScale: CGFloat = 1
-    @Published var videoPanOffset: CGSize = .zero
-    @Published var videoRotationQuarterTurns = 0
     @Published var lastEventRefreshAt: Date?
     @Published var lastCameraRefreshAt: Date?
     @Published var cameraStatusText: String = "Not connected"
@@ -50,15 +47,7 @@ final class NanightAppModel: ObservableObject {
     private let videoSurfaceSize = CGSize(width: 520, height: 292)
 
     var videoViewportSize: CGSize {
-        if videoRotationQuarterTurns.isMultiple(of: 2) {
-            return videoSurfaceSize
-        }
-
-        return CGSize(width: videoSurfaceSize.height, height: videoSurfaceSize.width)
-    }
-
-    var videoRotationDegrees: Double {
-        Double(videoRotationQuarterTurns * 90)
+        videoSurfaceSize
     }
 
     convenience init() {
@@ -356,62 +345,6 @@ final class NanightAppModel: ObservableObject {
         let muted = isPlaybackAudioMuted
         player?.isMuted = muted
         rtmpPlayer?.updateMuted(muted)
-    }
-
-    func zoomVideo(by magnification: CGFloat) {
-        let nextScale = min(max(videoZoomScale * (1 + magnification), 1), 4)
-        NanightLog.info("Video zoom input=\(magnification) oldScale=\(videoZoomScale) nextScale=\(nextScale)")
-        setVideoZoomScale(nextScale)
-    }
-
-    func setVideoZoomScale(_ scale: CGFloat) {
-        let nextScale = min(max(scale, 1), 4)
-        NanightLog.info("Video set zoom requested=\(scale) applied=\(nextScale) oldScale=\(videoZoomScale) oldPan=\(videoPanOffset.debugDescription)")
-        videoZoomScale = nextScale
-        videoPanOffset = clampedVideoOffset(videoPanOffset, scale: nextScale)
-        NanightLog.info("Video set zoom complete scale=\(videoZoomScale) pan=\(videoPanOffset.debugDescription)")
-    }
-
-    func panVideo(by delta: CGSize) {
-        guard videoZoomScale > 1 else {
-            NanightLog.info("Video pan ignored because zoomScale=\(videoZoomScale) delta=\(delta.debugDescription)")
-            videoPanOffset = .zero
-            return
-        }
-
-        let candidate = CGSize(
-            width: videoPanOffset.width + delta.width,
-            height: videoPanOffset.height + delta.height
-        )
-        NanightLog.info("Video pan input delta=\(delta.debugDescription) oldPan=\(videoPanOffset.debugDescription) candidate=\(candidate.debugDescription) scale=\(videoZoomScale)")
-        videoPanOffset = clampedVideoOffset(candidate, scale: videoZoomScale)
-        NanightLog.info("Video pan complete pan=\(videoPanOffset.debugDescription)")
-    }
-
-    func rotateVideoQuarterTurn(clockwise: Bool) {
-        let delta = clockwise ? 1 : -1
-        setVideoRotationQuarterTurns(videoRotationQuarterTurns + delta)
-    }
-
-    func setVideoRotationQuarterTurns(_ quarterTurns: Int) {
-        NanightLog.info("Video rotation set requested=\(quarterTurns) old=\(videoRotationQuarterTurns) scale=\(videoZoomScale) pan=\(videoPanOffset.debugDescription)")
-        videoRotationQuarterTurns = quarterTurns
-        videoPanOffset = clampedVideoOffset(videoPanOffset, scale: videoZoomScale)
-        NanightLog.info("Video rotation complete quarterTurns=\(videoRotationQuarterTurns) viewport=\(videoViewportSize.debugDescription) pan=\(videoPanOffset.debugDescription)")
-    }
-
-    private func clampedVideoOffset(_ offset: CGSize, scale: CGFloat) -> CGSize {
-        guard scale > 1 else {
-            return .zero
-        }
-
-        let maxX = videoViewportSize.width * (scale - 1) / 2
-        let maxY = videoViewportSize.height * (scale - 1) / 2
-
-        return CGSize(
-            width: min(max(offset.width, -maxX), maxX),
-            height: min(max(offset.height, -maxY), maxY)
-        )
     }
 
     func requestNotificationPermission() {

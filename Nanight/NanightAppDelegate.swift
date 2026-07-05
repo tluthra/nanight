@@ -19,9 +19,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private var cancellable: AnyCancellable?
     private var localOutsideClickEventMonitor: Any?
     private var globalOutsideClickEventMonitor: Any?
-    private var localGestureDebugEventMonitor: Any?
     private var popoverDebugSequence = 0
-    private var popoverDebugGestureCounts = GestureDebugCounts()
     private let defaultPopoverContentSize = NSSize(width: 520, height: 320)
 
     @MainActor
@@ -42,8 +40,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 self?.updateStatusItem()
             }
         }
-
-        installGestureDebugEventMonitor()
     }
 
     @MainActor
@@ -78,22 +74,13 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
 
         popoverDebugSequence += 1
-        popoverDebugGestureCounts = GestureDebugCounts()
 
         let createdPopover = popover == nil
 
         if popover == nil {
             let popover = NSPopover()
             popover.behavior = .transient
-            popover.contentViewController = NSHostingController(rootView: NanightMenuView(
-                model: model,
-                onVideoViewportChange: { [weak self] in
-                    Task { @MainActor in
-                        NanightLog.info("Popover video viewport callback")
-                        self?.updateVideoContainerSize(animated: false)
-                    }
-                }
-            ))
+            popover.contentViewController = NSHostingController(rootView: NanightMenuView(model: model))
             self.popover = popover
         }
 
@@ -104,7 +91,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         popover.delegate = self
         popover.contentSize = preferredContentSize
-        NanightLog.info("Popover #\(popoverDebugSequence) toggle \(createdPopover ? "creating" : "reusing") popover contentSize=\(popover.contentSize.debugDescription) preferredContentSize=\(preferredContentSize.debugDescription) state=\(model.connectionState) videoScale=\(model.videoZoomScale) rotationQuarterTurns=\(model.videoRotationQuarterTurns) viewport=\(model.videoViewportSize.debugDescription)")
+        NanightLog.info("Popover #\(popoverDebugSequence) toggle \(createdPopover ? "creating" : "reusing") popover contentSize=\(popover.contentSize.debugDescription) preferredContentSize=\(preferredContentSize.debugDescription) state=\(model.connectionState) viewport=\(model.videoViewportSize.debugDescription)")
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         NanightLog.info("Popover #\(popoverDebugSequence) show returned isShown=\(popover.isShown) \(popover.debugWindowDescription)")
     }
@@ -125,7 +112,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func popoverDidClose(_ notification: Notification) {
         let closedPopover = notification.object as? NSPopover
-        NanightLog.info("Popover #\(popoverDebugSequence) didClose notificationPopoverShown=\(closedPopover?.isShown == true) storedPopoverShown=\(popover?.isShown == true) appGestureCounts=\(popoverDebugGestureCounts.debugDescription)")
+        NanightLog.info("Popover #\(popoverDebugSequence) didClose notificationPopoverShown=\(closedPopover?.isShown == true) storedPopoverShown=\(popover?.isShown == true)")
         model.setVideoVisible(false)
         removeOutsideClickEventMonitors()
         NanightLog.info("Popover #\(popoverDebugSequence) didClose cleanup completed retainedPopover=\(popover != nil)")
@@ -253,27 +240,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
     }
 
-    private func installGestureDebugEventMonitor() {
-        let gestureEvents: NSEvent.EventTypeMask = [.beginGesture, .endGesture, .magnify, .rotate]
-
-        localGestureDebugEventMonitor = NSEvent.addLocalMonitorForEvents(matching: gestureEvents) { [weak self] event in
-            guard let self else {
-                return event
-            }
-
-            self.popoverDebugGestureCounts.record(event)
-            let popoverWindow = self.popover?.contentViewController?.view.window
-            let windowMatches = event.window === popoverWindow
-            let firstResponder = event.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-
-            NanightLog.info("Popover #\(self.popoverDebugSequence) appGestureEvent event=\(event.type.debugNameForNanight) phase=\(event.phase.debugNameForNanight) windowMatchesPopover=\(windowMatches) firstResponder=\(firstResponder) \(event.debugGestureValueDescription)")
-
-            return event
-        }
-
-        NanightLog.info("Popover installed app gesture debug event monitor")
-    }
-
     @MainActor
     private func showMenu(from sender: NSStatusBarButton) {
         let menu = NSMenu()
@@ -331,32 +297,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
 }
 
-private struct GestureDebugCounts {
-    private(set) var beginGesture = 0
-    private(set) var endGesture = 0
-    private(set) var magnify = 0
-    private(set) var rotate = 0
-
-    mutating func record(_ event: NSEvent) {
-        switch event.type {
-        case .beginGesture:
-            beginGesture += 1
-        case .endGesture:
-            endGesture += 1
-        case .magnify:
-            magnify += 1
-        case .rotate:
-            rotate += 1
-        default:
-            break
-        }
-    }
-
-    var debugDescription: String {
-        "begin=\(beginGesture) end=\(endGesture) magnify=\(magnify) rotate=\(rotate)"
-    }
-}
-
 private extension NSPopover {
     var debugWindowDescription: String {
         guard let contentView = contentViewController?.view else {
@@ -383,68 +323,9 @@ private extension NSEvent.EventType {
             return "leftMouseDown"
         case .rightMouseDown:
             return "rightMouseDown"
-        case .scrollWheel:
-            return "scrollWheel"
-        case .magnify:
-            return "magnify"
-        case .rotate:
-            return "rotate"
-        case .beginGesture:
-            return "beginGesture"
-        case .endGesture:
-            return "endGesture"
         default:
             return String(describing: self)
         }
-    }
-}
-
-private extension NSEvent {
-    var debugGestureValueDescription: String {
-        switch type {
-        case .magnify:
-            return "magnification=\(magnification)"
-        case .rotate:
-            return "rotation=\(rotation)"
-        default:
-            return "value=none"
-        }
-    }
-}
-
-private extension NSEvent.Phase {
-    var debugNameForNanight: String {
-        if isEmpty {
-            return "none"
-        }
-
-        var names: [String] = []
-
-        if contains(.began) {
-            names.append("began")
-        }
-
-        if contains(.stationary) {
-            names.append("stationary")
-        }
-
-        if contains(.changed) {
-            names.append("changed")
-        }
-
-        if contains(.ended) {
-            names.append("ended")
-        }
-
-        if contains(.cancelled) {
-            names.append("cancelled")
-        }
-
-        if contains(.mayBegin) {
-            names.append("mayBegin")
-        }
-
-        return names.joined(separator: "+")
     }
 }
 
