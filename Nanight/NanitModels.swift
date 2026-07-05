@@ -260,7 +260,7 @@ struct NanitUserSettings: Codable, Equatable {
     var selectedBabyUID: String?
     var startMonitoringOnLaunch: Bool = true
     var backgroundAudioEnabled: Bool = false
-    var startMuted: Bool = true
+    var startMuted: Bool = false
     var notificationsEnabled: Bool = false
     var notifyOnMotion: Bool = true
     var notifyOnSound: Bool = true

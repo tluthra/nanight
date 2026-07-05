@@ -24,10 +24,15 @@ final class NanightAppModel: ObservableObject {
     @Published var rtmpPlayer: NanightRTMPPlayer?
     @Published var videoPaused = false
     @Published var audioMuted = false
+    @Published var videoZoomScale: CGFloat = 1
+    @Published var videoPanOffset: CGSize = .zero
+    @Published var videoRotationQuarterTurns = 0
     @Published var lastEventRefreshAt: Date?
     @Published var lastCameraRefreshAt: Date?
     @Published var cameraStatusText: String = "Not connected"
     @Published var streamStatusText: String = "Stream unavailable"
+
+    private static let audioMutedStorageKey = "NanightAudioMuted"
 
     private let api: NanitAPIClient
     private let keychain: KeychainTokenStore
@@ -42,6 +47,19 @@ final class NanightAppModel: ObservableObject {
     private var lastNotifiedSoundAt: Date?
     private var wasOffline = false
     private var isVideoVisible = false
+    private let videoSurfaceSize = CGSize(width: 520, height: 292)
+
+    var videoViewportSize: CGSize {
+        if videoRotationQuarterTurns.isMultiple(of: 2) {
+            return videoSurfaceSize
+        }
+
+        return CGSize(width: videoSurfaceSize.height, height: videoSurfaceSize.width)
+    }
+
+    var videoRotationDegrees: Double {
+        Double(videoRotationQuarterTurns * 90)
+    }
 
     convenience init() {
         self.init(
@@ -60,6 +78,7 @@ final class NanightAppModel: ObservableObject {
         self.keychain = keychain
         self.notifications = notifications
         self.settings = NanitUserSettings.load()
+        self.audioMuted = UserDefaults.standard.bool(forKey: Self.audioMutedStorageKey)
 
         NanightLog.info("App launched")
 
@@ -139,6 +158,10 @@ final class NanightAppModel: ObservableObject {
 
     private var isPlaybackAudioMuted: Bool {
         audioMuted || !isVideoVisible
+    }
+
+    private var shouldPlayStream: Bool {
+        !videoPaused && isVideoVisible
     }
 
     func restoreSession() async {
@@ -288,7 +311,7 @@ final class NanightAppModel: ObservableObject {
     func reconnectStream() {
         NanightLog.info("Reconnecting stream")
         prepareStream()
-        if !videoPaused {
+        if shouldPlayStream {
             player?.play()
             rtmpPlayer?.play()
         }
@@ -300,7 +323,7 @@ final class NanightAppModel: ObservableObject {
         if videoPaused {
             player?.pause()
             rtmpPlayer?.pause()
-        } else {
+        } else if isVideoVisible {
             player?.play()
             rtmpPlayer?.play()
         }
@@ -308,6 +331,7 @@ final class NanightAppModel: ObservableObject {
 
     func toggleAudio() {
         audioMuted.toggle()
+        UserDefaults.standard.set(audioMuted, forKey: Self.audioMutedStorageKey)
         NanightLog.info(isAudioMuted ? "Audio muted" : "Audio unmuted")
         applyAudioPlaybackState()
     }
@@ -318,14 +342,72 @@ final class NanightAppModel: ObservableObject {
         }
 
         isVideoVisible = visible
-        NanightLog.info(visible ? "Video popover opened" : "Video popover closed; muting audio playback")
-        applyAudioPlaybackState()
+        NanightLog.info(visible ? "Video popover opened" : "Video popover closed; stopping stream playback")
+        if visible {
+            applyAudioPlaybackState()
+            if shouldPlayStream {
+                player?.play()
+                rtmpPlayer?.play()
+            }
+        } else {
+            player?.pause()
+            rtmpPlayer?.pause()
+            applyAudioPlaybackState()
+        }
     }
 
     private func applyAudioPlaybackState() {
         let muted = isPlaybackAudioMuted
         player?.isMuted = muted
         rtmpPlayer?.updateMuted(muted)
+    }
+
+    func zoomVideo(by magnification: CGFloat) {
+        let nextScale = min(max(videoZoomScale * (1 + magnification), 1), 4)
+        setVideoZoomScale(nextScale)
+    }
+
+    func setVideoZoomScale(_ scale: CGFloat) {
+        let nextScale = min(max(scale, 1), 4)
+        videoZoomScale = nextScale
+        videoPanOffset = clampedVideoOffset(videoPanOffset, scale: nextScale)
+    }
+
+    func panVideo(by delta: CGSize) {
+        guard videoZoomScale > 1 else {
+            videoPanOffset = .zero
+            return
+        }
+
+        let candidate = CGSize(
+            width: videoPanOffset.width + delta.width,
+            height: videoPanOffset.height + delta.height
+        )
+        videoPanOffset = clampedVideoOffset(candidate, scale: videoZoomScale)
+    }
+
+    func rotateVideoQuarterTurn(clockwise: Bool) {
+        let delta = clockwise ? 1 : -1
+        setVideoRotationQuarterTurns(videoRotationQuarterTurns + delta)
+    }
+
+    func setVideoRotationQuarterTurns(_ quarterTurns: Int) {
+        videoRotationQuarterTurns = quarterTurns
+        videoPanOffset = clampedVideoOffset(videoPanOffset, scale: videoZoomScale)
+    }
+
+    private func clampedVideoOffset(_ offset: CGSize, scale: CGFloat) -> CGSize {
+        guard scale > 1 else {
+            return .zero
+        }
+
+        let maxX = videoViewportSize.width * (scale - 1) / 2
+        let maxY = videoViewportSize.height * (scale - 1) / 2
+
+        return CGSize(
+            width: min(max(offset.width, -maxX), maxX),
+            height: min(max(offset.height, -maxY), maxY)
+        )
     }
 
     func requestNotificationPermission() {
@@ -519,7 +601,7 @@ final class NanightAppModel: ObservableObject {
             player = nil
             let playback = rtmpPlayer ?? NanightRTMPPlayer()
             rtmpPlayer = playback
-            playback.start(url: url, muted: isPlaybackAudioMuted, paused: videoPaused)
+            playback.start(url: url, muted: isPlaybackAudioMuted, paused: !shouldPlayStream)
             streamStatusText = playback.readyStateText
             NanightLog.info("Prepared HaishinKit playback for \(url.scheme ?? "unknown") stream")
             return
@@ -533,7 +615,7 @@ final class NanightAppModel: ObservableObject {
         newPlayer.isMuted = isPlaybackAudioMuted
         player = newPlayer
 
-        if !videoPaused {
+        if shouldPlayStream {
             newPlayer.play()
             streamStatusText = "Stream playback started"
             NanightLog.info("Stream playback started")

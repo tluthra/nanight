@@ -4,6 +4,7 @@ import SwiftUI
 
 struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
+    var onVideoViewportChange: (() -> Void)?
 
     var body: some View {
         Group {
@@ -21,7 +22,10 @@ struct NanightMenuView: View {
                     .frame(width: 360)
                     .padding(16)
             case .signedIn, .offline:
-                MonitorView(model: model)
+                MonitorView(
+                    model: model,
+                    onVideoViewportChange: onVideoViewportChange
+                )
             }
         }
     }
@@ -122,12 +126,14 @@ private struct BusyGlyph: View {
 
 private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
-    @State private var zoomScale: CGFloat = 1
-    @State private var baseZoomScale: CGFloat = 1
-    @State private var panOffset: CGSize = .zero
-    private let videoSize = CGSize(width: 520, height: 292)
+    let onVideoViewportChange: (() -> Void)?
+    @State private var gestureRotationDegrees: Double = 0
+    private let sourceVideoSize = CGSize(width: 520, height: 292)
+    private let rotationAnimation = Animation.interpolatingSpring(stiffness: 220, damping: 24)
 
     var body: some View {
+        let viewportSize = model.videoViewportSize
+
         ZStack(alignment: .topLeading) {
             ZStack {
                 ZStack {
@@ -139,27 +145,34 @@ private struct MonitorView: View {
                         PlaceholderVideoView(message: model.streamStatusText)
                     }
                 }
-                .frame(width: videoSize.width, height: videoSize.height)
-                .scaleEffect(zoomScale)
-                .offset(panOffset)
-
-                TrackpadPanView(zoomScale: $zoomScale, panOffset: $panOffset, videoSize: videoSize)
+                .frame(width: sourceVideoSize.width, height: sourceVideoSize.height)
+                .rotationEffect(.degrees(model.videoRotationDegrees + gestureRotationDegrees))
+                .scaleEffect(model.videoZoomScale)
+                .offset(model.videoPanOffset)
             }
-            .frame(width: videoSize.width, height: videoSize.height)
+            .frame(width: viewportSize.width, height: viewportSize.height)
             .background(Color.black)
             .clipped()
-            .gesture(
-                MagnificationGesture()
-                    .onChanged { value in
-                        zoomScale = min(max(baseZoomScale * value, 1), 4)
-                        panOffset = clampedOffset(panOffset, scale: zoomScale)
+            .overlay {
+                VideoGestureSurface(
+                    onMagnify: model.zoomVideo,
+                    onPan: model.panVideo,
+                    onRotateChanged: { degrees in
+                        gestureRotationDegrees = Double(-degrees)
+                    },
+                    onRotateEnded: { degrees in
+                        let targetDegrees = model.videoRotationDegrees + Double(-degrees)
+                        let targetQuarterTurns = Int((targetDegrees / 90).rounded())
+
+                        withAnimation(rotationAnimation) {
+                            model.setVideoRotationQuarterTurns(targetQuarterTurns)
+                            gestureRotationDegrees = 0
+                        }
+                        onVideoViewportChange?()
                     }
-                    .onEnded { value in
-                        zoomScale = min(max(baseZoomScale * value, 1), 4)
-                        baseZoomScale = zoomScale
-                        panOffset = clampedOffset(panOffset, scale: zoomScale)
-                    }
-            )
+                )
+            }
+            .animation(rotationAnimation, value: model.videoRotationQuarterTurns)
 
             VStack {
                 HStack(alignment: .top) {
@@ -215,81 +228,119 @@ private struct MonitorView: View {
                     .background(.black.opacity(0.58))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
         }
-        .frame(width: 520, height: 292)
+        .frame(width: viewportSize.width, height: viewportSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func clampedOffset(_ offset: CGSize, scale: CGFloat) -> CGSize {
-        guard scale > 1 else {
-            return .zero
-        }
-
-        let maxX = videoSize.width * (scale - 1) / 2
-        let maxY = videoSize.height * (scale - 1) / 2
-
-        return CGSize(
-            width: min(max(offset.width, -maxX), maxX),
-            height: min(max(offset.height, -maxY), maxY)
-        )
+        .animation(rotationAnimation, value: model.videoRotationQuarterTurns)
     }
 }
 
-private struct TrackpadPanView: NSViewRepresentable {
-    @Binding var zoomScale: CGFloat
-    @Binding var panOffset: CGSize
-    let videoSize: CGSize
+private struct VideoGestureSurface: NSViewRepresentable {
+    let onMagnify: (CGFloat) -> Void
+    let onPan: (CGSize) -> Void
+    let onRotateChanged: (CGFloat) -> Void
+    let onRotateEnded: (CGFloat) -> Void
 
-    func makeNSView(context: Context) -> TrackpadPanNSView {
-        let view = TrackpadPanNSView()
-        view.onPan = { delta in
-            guard zoomScale > 1 else {
-                panOffset = .zero
-                return
-            }
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
-            let candidate = CGSize(
-                width: panOffset.width + delta.width,
-                height: panOffset.height + delta.height
-            )
-            panOffset = clampedOffset(candidate)
-        }
+    func makeNSView(context: Context) -> VideoGestureNSView {
+        let view = VideoGestureNSView()
+        view.onMagnify = onMagnify
+        view.onPan = onPan
+        view.onRotateChanged = onRotateChanged
+        view.onRotateEnded = onRotateEnded
+        context.coordinator.installGestureRecognizers(on: view)
         return view
     }
 
-    func updateNSView(_ nsView: TrackpadPanNSView, context: Context) {
-        nsView.onPan = { delta in
-            guard zoomScale > 1 else {
-                panOffset = .zero
+    func updateNSView(_ nsView: VideoGestureNSView, context: Context) {
+        nsView.onMagnify = onMagnify
+        nsView.onPan = onPan
+        nsView.onRotateChanged = onRotateChanged
+        nsView.onRotateEnded = onRotateEnded
+    }
+
+    final class Coordinator: NSObject, NSGestureRecognizerDelegate {
+        func installGestureRecognizers(on view: VideoGestureNSView) {
+            let magnificationRecognizer = NSMagnificationGestureRecognizer(
+                target: self,
+                action: #selector(handleMagnification(_:))
+            )
+            magnificationRecognizer.delegate = self
+
+            let rotationRecognizer = NSRotationGestureRecognizer(
+                target: self,
+                action: #selector(handleRotation(_:))
+            )
+            rotationRecognizer.delegate = self
+
+            view.addGestureRecognizer(magnificationRecognizer)
+            view.addGestureRecognizer(rotationRecognizer)
+        }
+
+        @objc
+        private func handleMagnification(_ recognizer: NSMagnificationGestureRecognizer) {
+            guard let view = recognizer.view as? VideoGestureNSView else {
                 return
             }
 
-            let candidate = CGSize(
-                width: panOffset.width + delta.width,
-                height: panOffset.height + delta.height
-            )
-            panOffset = clampedOffset(candidate)
+            view.onMagnify?(recognizer.magnification)
+            recognizer.magnification = 0
         }
-    }
 
-    private func clampedOffset(_ offset: CGSize) -> CGSize {
-        let maxX = videoSize.width * (zoomScale - 1) / 2
-        let maxY = videoSize.height * (zoomScale - 1) / 2
+        @objc
+        private func handleRotation(_ recognizer: NSRotationGestureRecognizer) {
+            guard let view = recognizer.view as? VideoGestureNSView else {
+                return
+            }
 
-        return CGSize(
-            width: min(max(offset.width, -maxX), maxX),
-            height: min(max(offset.height, -maxY), maxY)
-        )
+            switch recognizer.state {
+            case .began:
+                view.onRotateChanged?(0)
+            case .changed:
+                view.onRotateChanged?(recognizer.rotationInDegrees)
+            case .ended, .cancelled, .failed:
+                view.onRotateEnded?(recognizer.rotationInDegrees)
+                recognizer.rotationInDegrees = 0
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: NSGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
+        ) -> Bool {
+            true
+        }
     }
 }
 
-private final class TrackpadPanNSView: NSView {
+private final class VideoGestureNSView: NSView {
+    var onMagnify: ((CGFloat) -> Void)?
     var onPan: ((CGSize) -> Void)?
+    var onRotateChanged: ((CGFloat) -> Void)?
+    var onRotateEnded: ((CGFloat) -> Void)?
 
     override var acceptsFirstResponder: Bool {
         true
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.makeFirstResponder(self)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
     }
 
     override func scrollWheel(with event: NSEvent) {
