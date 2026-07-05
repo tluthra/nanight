@@ -103,16 +103,12 @@ final class NanightAppModel: ObservableObject {
         return false
     }
 
-    var menuBarSystemImage: String {
+    var menuBarIconState: NanightMenuBarIconState {
         switch connectionState {
-        case .authExpired:
-            return "person.crop.circle.badge.exclamationmark"
-        case .offline:
-            return "wifi.slash"
-        case .restoring:
-            return "arrow.triangle.2.circlepath"
+        case .restoring, .offline, .authExpired:
+            return .connecting
         case .signedOut, .mfaRequired:
-            return "moon"
+            return .normal
         case .signedIn:
             break
         }
@@ -121,18 +117,18 @@ final class NanightAppModel: ObservableObject {
         let showSound = settings.soundMenuBarStateEnabled && activity.soundActive
 
         if showMotion && showSound {
-            return "bell.badge.fill"
+            return .motionAndSound
         }
 
         if showSound {
-            return "waveform"
+            return .sound
         }
 
         if showMotion {
-            return "figure.walk.motion"
+            return .motion
         }
 
-        return "video.fill"
+        return .normal
     }
 
     var statusLabel: String {
@@ -364,17 +360,21 @@ final class NanightAppModel: ObservableObject {
 
     func zoomVideo(by magnification: CGFloat) {
         let nextScale = min(max(videoZoomScale * (1 + magnification), 1), 4)
+        NanightLog.info("Video zoom input=\(magnification) oldScale=\(videoZoomScale) nextScale=\(nextScale)")
         setVideoZoomScale(nextScale)
     }
 
     func setVideoZoomScale(_ scale: CGFloat) {
         let nextScale = min(max(scale, 1), 4)
+        NanightLog.info("Video set zoom requested=\(scale) applied=\(nextScale) oldScale=\(videoZoomScale) oldPan=\(videoPanOffset.debugDescription)")
         videoZoomScale = nextScale
         videoPanOffset = clampedVideoOffset(videoPanOffset, scale: nextScale)
+        NanightLog.info("Video set zoom complete scale=\(videoZoomScale) pan=\(videoPanOffset.debugDescription)")
     }
 
     func panVideo(by delta: CGSize) {
         guard videoZoomScale > 1 else {
+            NanightLog.info("Video pan ignored because zoomScale=\(videoZoomScale) delta=\(delta.debugDescription)")
             videoPanOffset = .zero
             return
         }
@@ -383,7 +383,9 @@ final class NanightAppModel: ObservableObject {
             width: videoPanOffset.width + delta.width,
             height: videoPanOffset.height + delta.height
         )
+        NanightLog.info("Video pan input delta=\(delta.debugDescription) oldPan=\(videoPanOffset.debugDescription) candidate=\(candidate.debugDescription) scale=\(videoZoomScale)")
         videoPanOffset = clampedVideoOffset(candidate, scale: videoZoomScale)
+        NanightLog.info("Video pan complete pan=\(videoPanOffset.debugDescription)")
     }
 
     func rotateVideoQuarterTurn(clockwise: Bool) {
@@ -392,8 +394,10 @@ final class NanightAppModel: ObservableObject {
     }
 
     func setVideoRotationQuarterTurns(_ quarterTurns: Int) {
+        NanightLog.info("Video rotation set requested=\(quarterTurns) old=\(videoRotationQuarterTurns) scale=\(videoZoomScale) pan=\(videoPanOffset.debugDescription)")
         videoRotationQuarterTurns = quarterTurns
         videoPanOffset = clampedVideoOffset(videoPanOffset, scale: videoZoomScale)
+        NanightLog.info("Video rotation complete quarterTurns=\(videoRotationQuarterTurns) viewport=\(videoViewportSize.debugDescription) pan=\(videoPanOffset.debugDescription)")
     }
 
     private func clampedVideoOffset(_ offset: CGSize, scale: CGFloat) -> CGSize {

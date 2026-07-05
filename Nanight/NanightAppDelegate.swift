@@ -3,6 +3,14 @@ import Combine
 import QuartzCore
 import SwiftUI
 
+enum NanightMenuBarIconState: Equatable {
+    case normal
+    case connecting
+    case motion
+    case sound
+    case motionAndSound
+}
+
 final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @MainActor let model = NanightAppModel()
 
@@ -11,6 +19,9 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private var cancellable: AnyCancellable?
     private var localOutsideClickEventMonitor: Any?
     private var globalOutsideClickEventMonitor: Any?
+    private var localGestureDebugEventMonitor: Any?
+    private var popoverDebugSequence = 0
+    private var popoverDebugGestureCounts = GestureDebugCounts()
     private let defaultPopoverContentSize = NSSize(width: 520, height: 320)
 
     @MainActor
@@ -31,6 +42,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 self?.updateStatusItem()
             }
         }
+
+        installGestureDebugEventMonitor()
     }
 
     @MainActor
@@ -39,15 +52,15 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             return
         }
 
-        let image = NSImage(systemSymbolName: model.menuBarSystemImage, accessibilityDescription: "Nanight")
-        image?.isTemplate = true
-        button.image = image
+        button.image = NanightMenuBarIconRenderer.image(for: model.menuBarIconState)
         button.contentTintColor = nil
     }
 
     @objc
     @MainActor
     private func statusItemClicked(_ sender: NSStatusBarButton) {
+        NanightLog.info("Popover status item clicked event=\(NSApp.currentEvent?.type.debugNameForNanight ?? "nil") existingPopoverShown=\(popover?.isShown == true)")
+
         switch NSApp.currentEvent?.type {
         case .rightMouseUp:
             showMenu(from: sender)
@@ -59,24 +72,41 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     private func togglePopover(from sender: NSStatusBarButton) {
         if let popover, popover.isShown {
+            NanightLog.info("Popover toggle closing current popover contentSize=\(popover.contentSize.debugDescription)")
             popover.performClose(sender)
             return
         }
 
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = preferredContentSize
-        popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: NanightMenuView(
-            model: model,
-            onVideoViewportChange: { [weak self] in
-                Task { @MainActor in
-                    self?.updateVideoContainerSize(animated: false)
+        popoverDebugSequence += 1
+        popoverDebugGestureCounts = GestureDebugCounts()
+
+        let createdPopover = popover == nil
+
+        if popover == nil {
+            let popover = NSPopover()
+            popover.behavior = .transient
+            popover.contentViewController = NSHostingController(rootView: NanightMenuView(
+                model: model,
+                onVideoViewportChange: { [weak self] in
+                    Task { @MainActor in
+                        NanightLog.info("Popover video viewport callback")
+                        self?.updateVideoContainerSize(animated: false)
+                    }
                 }
-            }
-        ))
-        self.popover = popover
+            ))
+            self.popover = popover
+        }
+
+        guard let popover else {
+            NanightLog.warning("Popover #\(popoverDebugSequence) toggle skipped because popover creation failed")
+            return
+        }
+
+        popover.delegate = self
+        popover.contentSize = preferredContentSize
+        NanightLog.info("Popover #\(popoverDebugSequence) toggle \(createdPopover ? "creating" : "reusing") popover contentSize=\(popover.contentSize.debugDescription) preferredContentSize=\(preferredContentSize.debugDescription) state=\(model.connectionState) videoScale=\(model.videoZoomScale) rotationQuarterTurns=\(model.videoRotationQuarterTurns) viewport=\(model.videoViewportSize.debugDescription)")
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        NanightLog.info("Popover #\(popoverDebugSequence) show returned isShown=\(popover.isShown) \(popover.debugWindowDescription)")
     }
 
     @MainActor
@@ -85,17 +115,20 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             return
         }
 
+        NanightLog.info("Popover #\(popoverDebugSequence) didShow contentSize=\(shownPopover.contentSize.debugDescription) \(shownPopover.debugWindowDescription)")
         installOutsideClickEventMonitors(for: shownPopover)
         updateVideoContainerSize(animated: false)
         model.setVideoVisible(true)
+        NanightLog.info("Popover #\(popoverDebugSequence) didShow completed \(shownPopover.debugWindowDescription)")
     }
 
     @MainActor
     func popoverDidClose(_ notification: Notification) {
+        let closedPopover = notification.object as? NSPopover
+        NanightLog.info("Popover #\(popoverDebugSequence) didClose notificationPopoverShown=\(closedPopover?.isShown == true) storedPopoverShown=\(popover?.isShown == true) appGestureCounts=\(popoverDebugGestureCounts.debugDescription)")
         model.setVideoVisible(false)
         removeOutsideClickEventMonitors()
-        popover?.delegate = nil
-        popover = nil
+        NanightLog.info("Popover #\(popoverDebugSequence) didClose cleanup completed retainedPopover=\(popover != nil)")
     }
 
     @MainActor
@@ -115,6 +148,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         if let popover {
             if popover.contentSize != nextSize {
+                NanightLog.info("Popover resize from=\(popover.contentSize.debugDescription) to=\(nextSize.debugDescription) animated=\(animated) shown=\(popover.isShown)")
                 if animated,
                    popover.isShown,
                    let popoverWindow = popover.contentViewController?.view.window {
@@ -131,7 +165,11 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 } else {
                     popover.contentSize = nextSize
                 }
+            } else {
+                NanightLog.info("Popover resize skipped size already \(nextSize.debugDescription) shown=\(popover.isShown)")
             }
+        } else {
+            NanightLog.info("Popover resize skipped no popover nextSize=\(nextSize.debugDescription)")
         }
     }
 
@@ -205,12 +243,35 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         if let localOutsideClickEventMonitor {
             NSEvent.removeMonitor(localOutsideClickEventMonitor)
             self.localOutsideClickEventMonitor = nil
+            NanightLog.info("Popover removed local outside click monitor")
         }
 
         if let globalOutsideClickEventMonitor {
             NSEvent.removeMonitor(globalOutsideClickEventMonitor)
             self.globalOutsideClickEventMonitor = nil
+            NanightLog.info("Popover removed global outside click monitor")
         }
+    }
+
+    private func installGestureDebugEventMonitor() {
+        let gestureEvents: NSEvent.EventTypeMask = [.beginGesture, .endGesture, .magnify, .rotate]
+
+        localGestureDebugEventMonitor = NSEvent.addLocalMonitorForEvents(matching: gestureEvents) { [weak self] event in
+            guard let self else {
+                return event
+            }
+
+            self.popoverDebugGestureCounts.record(event)
+            let popoverWindow = self.popover?.contentViewController?.view.window
+            let windowMatches = event.window === popoverWindow
+            let firstResponder = event.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+
+            NanightLog.info("Popover #\(self.popoverDebugSequence) appGestureEvent event=\(event.type.debugNameForNanight) phase=\(event.phase.debugNameForNanight) windowMatchesPopover=\(windowMatches) firstResponder=\(firstResponder) \(event.debugGestureValueDescription)")
+
+            return event
+        }
+
+        NanightLog.info("Popover installed app gesture debug event monitor")
     }
 
     @MainActor
@@ -268,4 +329,217 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApplication.shared.terminate(nil)
     }
 
+}
+
+private struct GestureDebugCounts {
+    private(set) var beginGesture = 0
+    private(set) var endGesture = 0
+    private(set) var magnify = 0
+    private(set) var rotate = 0
+
+    mutating func record(_ event: NSEvent) {
+        switch event.type {
+        case .beginGesture:
+            beginGesture += 1
+        case .endGesture:
+            endGesture += 1
+        case .magnify:
+            magnify += 1
+        case .rotate:
+            rotate += 1
+        default:
+            break
+        }
+    }
+
+    var debugDescription: String {
+        "begin=\(beginGesture) end=\(endGesture) magnify=\(magnify) rotate=\(rotate)"
+    }
+}
+
+private extension NSPopover {
+    var debugWindowDescription: String {
+        guard let contentView = contentViewController?.view else {
+            return "contentView=nil"
+        }
+
+        guard let window = contentView.window else {
+            return "contentViewFrame=\(contentView.frame.debugDescription) window=nil"
+        }
+
+        let firstResponder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        return "contentViewFrame=\(contentView.frame.debugDescription) windowFrame=\(window.frame.debugDescription) firstResponder=\(firstResponder)"
+    }
+}
+
+private extension NSEvent.EventType {
+    var debugNameForNanight: String {
+        switch self {
+        case .leftMouseUp:
+            return "leftMouseUp"
+        case .rightMouseUp:
+            return "rightMouseUp"
+        case .leftMouseDown:
+            return "leftMouseDown"
+        case .rightMouseDown:
+            return "rightMouseDown"
+        case .scrollWheel:
+            return "scrollWheel"
+        case .magnify:
+            return "magnify"
+        case .rotate:
+            return "rotate"
+        case .beginGesture:
+            return "beginGesture"
+        case .endGesture:
+            return "endGesture"
+        default:
+            return String(describing: self)
+        }
+    }
+}
+
+private extension NSEvent {
+    var debugGestureValueDescription: String {
+        switch type {
+        case .magnify:
+            return "magnification=\(magnification)"
+        case .rotate:
+            return "rotation=\(rotation)"
+        default:
+            return "value=none"
+        }
+    }
+}
+
+private extension NSEvent.Phase {
+    var debugNameForNanight: String {
+        if isEmpty {
+            return "none"
+        }
+
+        var names: [String] = []
+
+        if contains(.began) {
+            names.append("began")
+        }
+
+        if contains(.stationary) {
+            names.append("stationary")
+        }
+
+        if contains(.changed) {
+            names.append("changed")
+        }
+
+        if contains(.ended) {
+            names.append("ended")
+        }
+
+        if contains(.cancelled) {
+            names.append("cancelled")
+        }
+
+        if contains(.mayBegin) {
+            names.append("mayBegin")
+        }
+
+        return names.joined(separator: "+")
+    }
+}
+
+private enum NanightMenuBarIconRenderer {
+    static func image(for state: NanightMenuBarIconState) -> NSImage {
+        guard state != .normal else {
+            let image = NSImage(systemSymbolName: "moon", accessibilityDescription: "Nanight")
+            image?.isTemplate = true
+            return image ?? NSImage(size: NSSize(width: 18, height: 18))
+        }
+
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            drawStreaksIfNeeded(for: state, in: rect)
+            drawMoon(in: rect)
+            drawSoundWavesIfNeeded(for: state, in: rect)
+            drawConnectingDotIfNeeded(for: state, in: rect)
+            return true
+        }
+        image.accessibilityDescription = "Nanight"
+        image.isTemplate = false
+        return image
+    }
+
+    private static func drawMoon(in rect: NSRect) {
+        guard let symbol = NSImage(systemSymbolName: "moon", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
+        else {
+            return
+        }
+
+        let drawRect = NSRect(x: rect.midX - 7, y: rect.midY - 7, width: 14, height: 14)
+        symbol.draw(in: drawRect)
+
+        NSColor.labelColor.setFill()
+        drawRect.fill(using: .sourceIn)
+    }
+
+    private static func drawConnectingDotIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
+        guard state == .connecting else {
+            return
+        }
+
+        NSColor.systemYellow.setFill()
+        NSBezierPath(ovalIn: NSRect(x: rect.maxX - 4.2, y: rect.minY + 2.8, width: 3.6, height: 3.6)).fill()
+    }
+
+    private static func drawStreaksIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
+        guard state == .motion || state == .motionAndSound else {
+            return
+        }
+
+        NSColor.systemYellow.setStroke()
+
+        let lines: [(start: NSPoint, end: NSPoint, width: CGFloat)] = [
+            (NSPoint(x: rect.minX + 1.4, y: rect.midY + 3.8), NSPoint(x: rect.minX + 5.8, y: rect.midY + 3.8), 1.1),
+            (NSPoint(x: rect.minX + 0.8, y: rect.midY + 0.3), NSPoint(x: rect.minX + 5.4, y: rect.midY + 0.3), 1.0),
+            (NSPoint(x: rect.minX + 2.2, y: rect.midY - 3.0), NSPoint(x: rect.minX + 5.8, y: rect.midY - 3.0), 0.9)
+        ]
+
+        for line in lines {
+            let path = NSBezierPath()
+            path.lineCapStyle = .round
+            path.lineWidth = line.width
+            path.move(to: line.start)
+            path.line(to: line.end)
+            path.stroke()
+        }
+    }
+
+    private static func drawSoundWavesIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
+        guard state == .sound || state == .motionAndSound else {
+            return
+        }
+
+        NSColor.systemOrange.setStroke()
+
+        for index in 0..<2 {
+            let inset = CGFloat(index) * 2.6
+            let arcRect = NSRect(
+                x: rect.midX - 1.4 - inset,
+                y: rect.midY - 4.8 - inset,
+                width: 9.5 + inset * 2,
+                height: 9.5 + inset * 2
+            )
+            let path = NSBezierPath()
+            path.lineWidth = index == 0 ? 1.2 : 1.0
+            path.lineCapStyle = .round
+            path.appendArc(
+                withCenter: NSPoint(x: arcRect.midX, y: arcRect.midY),
+                radius: arcRect.width / 2,
+                startAngle: -36,
+                endAngle: 36
+            )
+            path.stroke()
+        }
+    }
 }

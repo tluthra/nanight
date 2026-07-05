@@ -12,19 +12,19 @@ final class NanightRTMPPlayer: ObservableObject {
     private var view: PiPHKView?
     private var connection: RTMPConnection?
     private var stream: RTMPStream?
-    private var audioRenderer: NanightAudioRenderer?
+    private let audioEngine = AVAudioEngine()
+    private lazy var audioPlayer = AudioPlayer(audioEngine: audioEngine)
     private var connectTask: Task<Void, Never>?
     private var statusTasks: [Task<Void, Never>] = []
     private var currentURL: URL?
-    private var audioEnabled = false
+    private var isMuted = true
     private var playbackGeneration = 0
 
     func start(url: URL, muted: Bool, paused: Bool) {
-        let shouldEnableAudio = !muted
         let needsRestart = currentURL != url || stream == nil
 
         currentURL = url
-        audioEnabled = shouldEnableAudio
+        isMuted = muted
         lastErrorMessage = nil
 
         if paused {
@@ -36,20 +36,20 @@ final class NanightRTMPPlayer: ObservableObject {
         }
 
         guard needsRestart else {
-            applyAudioEnabled(shouldEnableAudio)
+            updateMuted(muted)
             NanightLog.info("HaishinKit RTMPS playback already matches requested audio state")
             return
         }
 
         close()
         currentURL = url
-        audioEnabled = shouldEnableAudio
+        isMuted = muted
         lastErrorMessage = nil
 
         playbackGeneration += 1
         let generation = playbackGeneration
         connectTask = Task { [weak self] in
-            await self?.connect(url: url, generation: generation, audioEnabled: shouldEnableAudio)
+            await self?.connect(url: url, generation: generation, muted: muted)
         }
     }
 
@@ -61,7 +61,7 @@ final class NanightRTMPPlayer: ObservableObject {
         }
 
         NanightLog.info("Starting HaishinKit RTMPS playback")
-        start(url: currentURL, muted: !audioEnabled, paused: false)
+        start(url: currentURL, muted: isMuted, paused: false)
     }
 
     func pause() {
@@ -71,9 +71,14 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     func updateMuted(_ muted: Bool) {
-        let shouldEnableAudio = !muted
-        audioEnabled = shouldEnableAudio
-        applyAudioEnabled(shouldEnableAudio)
+        isMuted = muted
+        guard let currentURL, stream != nil else {
+            return
+        }
+
+        NanightLog.info("Restarting RTMPS playback to \(muted ? "detach" : "attach") audio output")
+        close()
+        start(url: currentURL, muted: muted, paused: false)
     }
 
     func close() {
@@ -82,20 +87,15 @@ final class NanightRTMPPlayer: ObservableObject {
         connectTask = nil
         statusTasks.forEach { $0.cancel() }
         statusTasks.removeAll()
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
 
         let activeStream = stream
         let activeConnection = connection
-        let activeAudioRenderer = audioRenderer
-        audioRenderer?.setEnabled(false)
-        audioRenderer = nil
         stream = nil
         connection = nil
         Task {
-            if let activeStream, let activeAudioRenderer {
-                await activeStream.removeOutput(activeAudioRenderer)
-            }
-            activeAudioRenderer?.stop()
-
             if let activeStream {
                 do {
                     _ = try await activeStream.close()
@@ -114,7 +114,7 @@ final class NanightRTMPPlayer: ObservableObject {
         }
     }
 
-    private func connect(url: URL, generation: Int, audioEnabled: Bool) async {
+    private func connect(url: URL, generation: Int, muted: Bool) async {
         readyStateText = "Connecting RTMPS stream"
         NanightLog.info("HaishinKit connecting to RTMPS stream")
 
@@ -125,30 +125,26 @@ final class NanightRTMPPlayer: ObservableObject {
 
             await attachVideoView(to: newStream)
             guard isCurrentPlayback(generation) else {
-                await closeInactiveSession(stream: newStream, connection: newConnection, audioRenderer: nil)
+                await closeInactiveSession(stream: newStream, connection: newConnection)
                 return
             }
 
             connection = newConnection
             stream = newStream
-            let newAudioRenderer = NanightAudioRenderer()
-            newAudioRenderer.setEnabled(audioEnabled)
-            audioRenderer = newAudioRenderer
-            await newStream.addOutput(newAudioRenderer)
-            NanightLog.info(audioEnabled ? "Audio renderer attached to RTMPS stream" : "Audio renderer attached muted")
+            await configureAudio(muted: muted, stream: newStream)
 
             observeStatus(connection: newConnection, stream: newStream)
 
             _ = try await newConnection.connect(target.command)
             guard isCurrentPlayback(generation) else {
-                await closeInactiveSession(stream: newStream, connection: newConnection, audioRenderer: newAudioRenderer)
+                await closeInactiveSession(stream: newStream, connection: newConnection)
                 return
             }
             NanightLog.info("HaishinKit RTMPS connection opened")
 
             _ = try await newStream.play(target.streamName)
             guard isCurrentPlayback(generation) else {
-                await closeInactiveSession(stream: newStream, connection: newConnection, audioRenderer: newAudioRenderer)
+                await closeInactiveSession(stream: newStream, connection: newConnection)
                 return
             }
             await attachVideoView(to: newStream)
@@ -168,17 +164,20 @@ final class NanightRTMPPlayer: ObservableObject {
         generation == playbackGeneration
     }
 
-    private func applyAudioEnabled(_ enabled: Bool) {
-        audioRenderer?.setEnabled(enabled)
+    private func configureAudio(muted: Bool, stream: RTMPStream) async {
+        if muted {
+            if audioEngine.isRunning {
+                audioEngine.stop()
+            }
+            NanightLog.info("HaishinKit audio output disabled for muted stream")
+        } else {
+            await stream.attachAudioPlayer(audioPlayer)
+            await stream.setSoundTransform(SoundTransform(volume: 1))
+            NanightLog.info("HaishinKit audio output attached")
+        }
     }
 
-    private func closeInactiveSession(stream: RTMPStream, connection: RTMPConnection, audioRenderer: NanightAudioRenderer?) async {
-        if let audioRenderer {
-            audioRenderer.setEnabled(false)
-            await stream.removeOutput(audioRenderer)
-            audioRenderer.stop()
-        }
-
+    private func closeInactiveSession(stream: RTMPStream, connection: RTMPConnection) async {
         do {
             _ = try await stream.close()
         } catch {
