@@ -46,6 +46,14 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+if [[ "$NOTARIZE" == "1" && -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="Developer ID Application"
+fi
+
+if [[ -z "$DEVELOPMENT_TEAM" && -n "$APPLE_TEAM_ID" ]]; then
+  DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+fi
+
 build_args=(
   -project "$ROOT_DIR/$PROJECT"
   -scheme "$SCHEME"
@@ -60,6 +68,9 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
   build_args+=(
     CODE_SIGN_STYLE=Manual
     CODE_SIGN_IDENTITY="$SIGNING_IDENTITY"
+    CODE_SIGNING_ALLOWED=YES
+    CODE_SIGNING_REQUIRED=YES
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
     OTHER_CODE_SIGN_FLAGS=--timestamp
   )
 fi
@@ -92,29 +103,44 @@ echo "Creating $ZIP_PATH..."
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 
 if [[ "$NOTARIZE" == "1" ]]; then
-  authority="$(codesign -dv "$APP_PATH" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
-  if [[ "$authority" != Developer\ ID\ Application:* ]]; then
-    echo "error: notarization requires a Developer ID Application signature." >&2
-    echo "Set SIGNING_IDENTITY to your Developer ID Application identity and try again." >&2
-    exit 1
-  fi
-
   echo "Submitting $ZIP_PATH for notarization..."
+  notary_result="$(mktemp "${TMPDIR:-/tmp}/nanight-notary.XXXXXX.json")"
   if [[ -n "$NOTARY_KEYCHAIN_PROFILE" ]]; then
-    xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait
+    xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait --output-format json > "$notary_result"
   elif [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_PASSWORD" ]]; then
     xcrun notarytool submit "$ZIP_PATH" \
       --apple-id "$APPLE_ID" \
       --team-id "$APPLE_TEAM_ID" \
       --password "$APPLE_APP_PASSWORD" \
-      --wait
+      --wait \
+      --output-format json > "$notary_result"
   else
     echo "error: set NOTARY_KEYCHAIN_PROFILE, or set APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_PASSWORD." >&2
     exit 1
   fi
 
+  cat "$notary_result"
+  notary_status="$(plutil -extract status raw -o - "$notary_result")"
+  notary_id="$(plutil -extract id raw -o - "$notary_result")"
+  rm -f "$notary_result"
+
+  if [[ "$notary_status" != "Accepted" ]]; then
+    echo "error: notarization status was $notary_status." >&2
+    if [[ -n "$NOTARY_KEYCHAIN_PROFILE" ]]; then
+      echo "Inspect the log with:" >&2
+      echo "  xcrun notarytool log $notary_id --keychain-profile $NOTARY_KEYCHAIN_PROFILE" >&2
+    else
+      echo "Inspect the log with:" >&2
+      echo "  xcrun notarytool log $notary_id --apple-id \"$APPLE_ID\" --team-id \"$APPLE_TEAM_ID\" --password \"APP_SPECIFIC_PASSWORD\"" >&2
+    fi
+    exit 1
+  fi
+
   echo "Stapling notarization ticket..."
   xcrun stapler staple "$APP_PATH"
+
+  echo "Validating stapled notarization ticket..."
+  xcrun stapler validate "$APP_PATH"
 
   echo "Recreating $ZIP_PATH with stapled app..."
   rm -f "$ZIP_PATH"

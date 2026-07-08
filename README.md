@@ -49,6 +49,21 @@ NOTARIZE=1 \
 ./scripts/build-distributable.sh
 ```
 
+To create or update a GitHub Release and upload the zip:
+
+```sh
+gh auth login
+./scripts/release-github.sh v1.0
+```
+
+By default, the release upload requires `Nanight.app` to be Developer ID signed with a valid stapled notarization ticket. For a smoother install on other Macs, run the notarized build command first, then upload that zip:
+
+```sh
+BUILD=0 ./scripts/release-github.sh v1.0
+```
+
+Set `ALLOW_UNNOTARIZED=1` only for internal test releases where you expect Gatekeeper warnings.
+
 ## Notes
 
 This app uses unofficial Nanit API and streaming behavior learned from public community projects. It may stop working if Nanit changes its services.
