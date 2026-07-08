@@ -24,7 +24,7 @@ final class NanightAppModel: ObservableObject {
     @Published var rtmpPlayer: NanightRTMPPlayer?
     @Published var climate: NanitClimateReading?
     @Published var videoPaused = false
-    @Published var audioMuted = false
+    @Published var audioMuted = true
     @Published var lastEventRefreshAt: Date?
     @Published var lastCameraRefreshAt: Date?
     @Published var cameraStatusText: String = "Not connected"
@@ -68,7 +68,7 @@ final class NanightAppModel: ObservableObject {
         self.keychain = keychain
         self.notifications = notifications
         self.settings = NanitUserSettings.load()
-        self.audioMuted = UserDefaults.standard.bool(forKey: Self.audioMutedStorageKey)
+        self.audioMuted = UserDefaults.standard.object(forKey: Self.audioMutedStorageKey) as? Bool ?? true
 
         NanightLog.info("App launched")
 
@@ -118,7 +118,7 @@ final class NanightAppModel: ObservableObject {
             return .motion
         }
 
-        return .normal
+        return .idle
     }
 
     var statusLabel: String {

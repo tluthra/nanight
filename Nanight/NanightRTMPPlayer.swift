@@ -1,4 +1,5 @@
 @preconcurrency import AVKit
+import AudioToolbox
 import Combine
 import HaishinKit
 import RTMPHaishinKit
@@ -76,12 +77,14 @@ final class NanightRTMPPlayer: ObservableObject {
 
     func updateMuted(_ muted: Bool) {
         isMuted = muted
-        guard let currentURL else {
-            return
-        }
+        applyEngineOutputMute(muted)
+        Task { [weak self] in
+            guard let self, let stream = self.stream else {
+                return
+            }
 
-        NanightLog.info("Restarting RTMPS playback to apply \(muted ? "muted" : "unmuted") audio output")
-        restart(url: currentURL, muted: muted)
+            await self.applyStreamMute(muted, to: stream)
+        }
     }
 
     func close() {
@@ -199,33 +202,32 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     private func configureAudio(muted: Bool, stream: RTMPStream) async {
-        guard !muted else {
-            await stream.attachAudioPlayer(nil)
-            audioPlayer = nil
-            audioEngine = nil
-            NanightLog.info("HaishinKit audio output detached for muted stream")
-            return
-        }
-
         let newAudioEngine = AVAudioEngine()
         let newAudioPlayer = AudioPlayer(audioEngine: newAudioEngine)
         audioEngine = newAudioEngine
         audioPlayer = newAudioPlayer
+        applyEngineOutputMute(muted)
         await stream.attachAudioPlayer(newAudioPlayer)
         await applyStreamMute(muted, to: stream)
         NanightLog.info("HaishinKit audio output attached \(muted ? "muted" : "unmuted")")
     }
 
     private func applyAudioState(to stream: RTMPStream, generation: Int) async {
-        if isMuted {
-            await stream.attachAudioPlayer(nil)
-            audioPlayer = nil
-            audioEngine = nil
-            NanightLog.info("HaishinKit audio output detached after muted playback start")
-        } else {
-            await applyStreamMute(false, to: stream)
-            scheduleMuteRefresh(for: stream, generation: generation)
+        applyEngineOutputMute(isMuted)
+        await applyStreamMute(isMuted, to: stream)
+        scheduleMuteRefresh(for: stream, generation: generation)
+    }
+
+    private func applyEngineOutputMute(_ muted: Bool) {
+        guard let parameterTree = audioEngine?.outputNode.auAudioUnit.parameterTree,
+              let volumeParameter = parameterTree.parameter(withAddress: AUParameterAddress(kHALOutputParam_Volume))
+        else {
+            NanightLog.warning("HaishinKit audio output mute skipped because output volume parameter is unavailable")
+            return
         }
+
+        volumeParameter.value = muted ? 0 : 1
+        NanightLog.info("HaishinKit audio output node \(muted ? "muted" : "unmuted")")
     }
 
     private func applyStreamMute(_ muted: Bool, to stream: RTMPStream) async {
@@ -243,6 +245,7 @@ final class NanightRTMPPlayer: ObservableObject {
                     }
 
                     let muted = self.isMuted
+                    self.applyEngineOutputMute(muted)
                     Task {
                         await self.applyStreamMute(muted, to: stream)
                     }

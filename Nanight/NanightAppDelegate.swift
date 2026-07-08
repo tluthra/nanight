@@ -5,6 +5,7 @@ import SwiftUI
 
 enum NanightMenuBarIconState: Equatable {
     case normal
+    case idle
     case connecting
     case motion
     case sound
@@ -331,96 +332,29 @@ private extension NSEvent.EventType {
 
 private enum NanightMenuBarIconRenderer {
     static func image(for state: NanightMenuBarIconState) -> NSImage {
-        guard state != .normal else {
-            let image = NSImage(systemSymbolName: "moon", accessibilityDescription: "Nanight")
-            image?.isTemplate = true
-            return image ?? NSImage(size: NSSize(width: 18, height: 18))
-        }
+        symbolImage(named: symbolName(for: state))
+            ?? symbolImage(named: "moon")
+            ?? NSImage(size: NSSize(width: 18, height: 18))
+    }
 
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
-            drawStreaksIfNeeded(for: state, in: rect)
-            drawMoon(in: rect)
-            drawSoundWavesIfNeeded(for: state, in: rect)
-            drawConnectingDotIfNeeded(for: state, in: rect)
-            return true
+    private static func symbolName(for state: NanightMenuBarIconState) -> String {
+        switch state {
+        case .normal:
+            return "moon"
+        case .idle:
+            return "moon.zzz"
+        case .connecting:
+            return "moon"
+        case .motion, .motionAndSound:
+            return "moon.haze"
+        case .sound:
+            return "moon.dust"
         }
-        image.accessibilityDescription = "Nanight"
-        image.isTemplate = false
+    }
+
+    private static func symbolImage(named name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Nanight")
+        image?.isTemplate = true
         return image
-    }
-
-    private static func drawMoon(in rect: NSRect) {
-        guard let symbol = NSImage(systemSymbolName: "moon", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
-        else {
-            return
-        }
-
-        let drawRect = NSRect(x: rect.midX - 7, y: rect.midY - 7, width: 14, height: 14)
-        symbol.draw(in: drawRect)
-
-        NSColor.labelColor.setFill()
-        drawRect.fill(using: .sourceIn)
-    }
-
-    private static func drawConnectingDotIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
-        guard state == .connecting else {
-            return
-        }
-
-        NSColor.systemYellow.setFill()
-        NSBezierPath(ovalIn: NSRect(x: rect.maxX - 4.2, y: rect.minY + 2.8, width: 3.6, height: 3.6)).fill()
-    }
-
-    private static func drawStreaksIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
-        guard state == .motion || state == .motionAndSound else {
-            return
-        }
-
-        NSColor.systemYellow.setStroke()
-
-        let lines: [(start: NSPoint, end: NSPoint, width: CGFloat)] = [
-            (NSPoint(x: rect.minX + 1.4, y: rect.midY + 3.8), NSPoint(x: rect.minX + 5.8, y: rect.midY + 3.8), 1.1),
-            (NSPoint(x: rect.minX + 0.8, y: rect.midY + 0.3), NSPoint(x: rect.minX + 5.4, y: rect.midY + 0.3), 1.0),
-            (NSPoint(x: rect.minX + 2.2, y: rect.midY - 3.0), NSPoint(x: rect.minX + 5.8, y: rect.midY - 3.0), 0.9)
-        ]
-
-        for line in lines {
-            let path = NSBezierPath()
-            path.lineCapStyle = .round
-            path.lineWidth = line.width
-            path.move(to: line.start)
-            path.line(to: line.end)
-            path.stroke()
-        }
-    }
-
-    private static func drawSoundWavesIfNeeded(for state: NanightMenuBarIconState, in rect: NSRect) {
-        guard state == .sound || state == .motionAndSound else {
-            return
-        }
-
-        NSColor.systemOrange.setStroke()
-
-        for index in 0..<2 {
-            let inset = CGFloat(index) * 2.6
-            let arcRect = NSRect(
-                x: rect.midX - 1.4 - inset,
-                y: rect.midY - 4.8 - inset,
-                width: 9.5 + inset * 2,
-                height: 9.5 + inset * 2
-            )
-            let path = NSBezierPath()
-            path.lineWidth = index == 0 ? 1.2 : 1.0
-            path.lineCapStyle = .round
-            path.appendArc(
-                withCenter: NSPoint(x: arcRect.midX, y: arcRect.midY),
-                radius: arcRect.width / 2,
-                startAngle: -36,
-                endAngle: 36
-            )
-            path.stroke()
-        }
     }
 }
