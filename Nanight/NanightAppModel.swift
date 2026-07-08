@@ -22,6 +22,7 @@ final class NanightAppModel: ObservableObject {
     @Published var streamURL: URL?
     @Published var player: AVPlayer?
     @Published var rtmpPlayer: NanightRTMPPlayer?
+    @Published var climate: NanitClimateReading?
     @Published var videoPaused = false
     @Published var audioMuted = false
     @Published var lastEventRefreshAt: Date?
@@ -289,6 +290,7 @@ final class NanightAppModel: ObservableObject {
         NanightLog.info("Selecting camera \(babyUID)")
         settings.selectedBabyUID = babyUID
         activity = NurseryActivity()
+        climate = nil
         prepareStream()
         startMonitoring()
     }
@@ -392,6 +394,7 @@ final class NanightAppModel: ObservableObject {
         do {
             let accessToken = try await validAccessToken()
             let events = try await api.messages(accessToken: accessToken, babyUID: camera.uid, limit: 20)
+            await refreshClimate(accessToken: accessToken, camera: camera)
             let newActivity = NurseryActivity.current(
                 from: events,
                 activeWindow: settings.eventActiveWindowSeconds
@@ -422,6 +425,7 @@ final class NanightAppModel: ObservableObject {
         tokens = nil
         cameras = []
         activity = NurseryActivity()
+        climate = nil
         pendingMFAToken = nil
         pendingMFAEmail = nil
         pendingMFAPassword = nil
@@ -452,6 +456,8 @@ final class NanightAppModel: ObservableObject {
             "Stream status: \(streamStatusText)",
             "Motion active: \(activity.motionActive)",
             "Sound active: \(activity.soundActive)",
+            "Temperature: \(climate?.temperatureCelsius.map { "\($0) C" } ?? "unknown")",
+            "Humidity: \(climate?.humidityPercent.map { "\($0)%" } ?? "unknown")",
             "Last camera refresh: \(lastCameraRefreshAt?.description ?? "never")",
             "Last event refresh: \(lastEventRefreshAt?.description ?? "never")",
             "",
@@ -559,6 +565,22 @@ final class NanightAppModel: ObservableObject {
         } else {
             streamStatusText = "Stream prepared while paused"
             NanightLog.info("Stream prepared while video is paused")
+        }
+    }
+
+    private func refreshClimate(accessToken: String, camera: NanitBaby) async {
+        do {
+            guard let reading = try await api.climate(accessToken: accessToken, cameraUID: camera.cameraUID) else {
+                NanightLog.info("Climate refresh returned no sensor values for \(camera.name)")
+                return
+            }
+
+            climate = reading
+            NanightLog.info(
+                "Climate refresh succeeded for \(camera.name): tempC=\(reading.temperatureCelsius?.description ?? "nil"), humidity=\(reading.humidityPercent?.description ?? "nil")"
+            )
+        } catch {
+            NanightLog.warning("Climate refresh failed: \(userFacing(error))")
         }
     }
 

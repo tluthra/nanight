@@ -139,6 +139,7 @@ private struct MonitorView: View {
                     }
                 }
                 .frame(width: sourceVideoSize.width, height: sourceVideoSize.height)
+                .allowsHitTesting(false)
             }
             .frame(width: viewportSize.width, height: viewportSize.height)
             .background(Color.black)
@@ -150,9 +151,9 @@ private struct MonitorView: View {
                         Text(model.activeCamera?.name ?? "No camera")
                             .font(.headline.weight(.semibold))
                         if let rtmpPlayer = model.rtmpPlayer {
-                            RTMPLiveStatusRow(player: rtmpPlayer)
+                            RTMPLiveStatusRow(player: rtmpPlayer, climate: model.climate)
                         } else {
-                            LiveStatusRow(isConnecting: false)
+                            LiveStatusRow(isConnecting: false, climate: model.climate)
                         }
                     }
                     .foregroundStyle(.white)
@@ -212,14 +213,19 @@ private struct MonitorView: View {
 
 private struct RTMPLiveStatusRow: View {
     @ObservedObject var player: NanightRTMPPlayer
+    let climate: NanitClimateReading?
 
     var body: some View {
-        LiveStatusRow(isConnecting: player.readyStateText == "Connecting RTMPS stream")
+        LiveStatusRow(
+            isConnecting: player.readyStateText == "Connecting RTMPS stream",
+            climate: climate
+        )
     }
 }
 
 private struct LiveStatusRow: View {
     let isConnecting: Bool
+    let climate: NanitClimateReading?
 
     private let formatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -238,10 +244,43 @@ private struct LiveStatusRow: View {
 
                 Text(formatter.string(from: context.date))
                     .monospacedDigit()
+
+                if let temperature = temperatureText {
+                    Text("•")
+                    Text(temperature)
+                        .monospacedDigit()
+                }
+
+                if let humidity = humidityText {
+                    Text("•")
+                    Text(humidity)
+                        .monospacedDigit()
+                }
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.78))
         }
+    }
+
+    private var temperatureText: String? {
+        guard let temperatureCelsius = climate?.temperatureCelsius else {
+            return nil
+        }
+
+        if Locale.current.measurementSystem == .us {
+            let fahrenheit = temperatureCelsius * 9 / 5 + 32
+            return "\(Int(fahrenheit.rounded()))°F"
+        }
+
+        return "\(Int(temperatureCelsius.rounded()))°C"
+    }
+
+    private var humidityText: String? {
+        guard let humidityPercent = climate?.humidityPercent else {
+            return nil
+        }
+
+        return "\(Int(humidityPercent.rounded()))%"
     }
 }
 

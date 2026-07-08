@@ -120,4 +120,61 @@ struct NanightTests {
 
         #expect(url?.absoluteString == "rtmps://media-secured.nanit.com/nanit/baby-1.token.abc")
     }
+
+    @Test func parsesClimateSensorDataResponse() throws {
+        let data = sensorDataResponse(requestID: 7, temperatureMilli: 22_300, humidityMilli: 45_500)
+
+        let reading = try NanitSensorWebSocketCodec.climateReading(from: data, matchingRequestID: 7)
+
+        #expect(reading?.temperatureCelsius == 22.3)
+        #expect(reading?.humidityPercent == 45.5)
+    }
+
+    private func sensorDataResponse(
+        requestID: Int32,
+        temperatureMilli: UInt64,
+        humidityMilli: UInt64
+    ) -> Data {
+        var temperature = Data()
+        temperature.appendVarintFieldForTest(1, value: 2)
+        temperature.appendVarintFieldForTest(6, value: temperatureMilli)
+
+        var humidity = Data()
+        humidity.appendVarintFieldForTest(1, value: 3)
+        humidity.appendVarintFieldForTest(6, value: humidityMilli)
+
+        var response = Data()
+        response.appendVarintFieldForTest(1, value: UInt64(requestID))
+        response.appendVarintFieldForTest(2, value: 12)
+        response.appendVarintFieldForTest(3, value: 0)
+        response.appendLengthDelimitedFieldForTest(9, data: temperature)
+        response.appendLengthDelimitedFieldForTest(9, data: humidity)
+
+        var message = Data()
+        message.appendVarintFieldForTest(1, value: 2)
+        message.appendLengthDelimitedFieldForTest(3, data: response)
+        return message
+    }
+}
+
+private extension Data {
+    mutating func appendVarintFieldForTest(_ number: Int, value: UInt64) {
+        appendVarintForTest(UInt64(number << 3))
+        appendVarintForTest(value)
+    }
+
+    mutating func appendLengthDelimitedFieldForTest(_ number: Int, data: Data) {
+        appendVarintForTest(UInt64(number << 3 | 2))
+        appendVarintForTest(UInt64(data.count))
+        append(data)
+    }
+
+    mutating func appendVarintForTest(_ value: UInt64) {
+        var remaining = value
+        while remaining >= 0x80 {
+            append(UInt8(remaining & 0x7f) | 0x80)
+            remaining >>= 7
+        }
+        append(UInt8(remaining))
+    }
 }

@@ -247,6 +247,22 @@ struct NurseryActivity: Equatable {
     }
 }
 
+struct NanitClimateReading: Equatable {
+    let temperatureCelsius: Double?
+    let humidityPercent: Double?
+    let updatedAt: Date
+
+    init(
+        temperatureCelsius: Double?,
+        humidityPercent: Double?,
+        updatedAt: Date = Date()
+    ) {
+        self.temperatureCelsius = temperatureCelsius
+        self.humidityPercent = humidityPercent
+        self.updatedAt = updatedAt
+    }
+}
+
 enum NanitConnectionState: Equatable {
     case signedOut
     case restoring

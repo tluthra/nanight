@@ -177,6 +177,49 @@ final class NanitAPIClient {
         URL(string: "wss://\(cameraIP):442")
     }
 
+    func climate(accessToken: String, cameraUID: String) async throws -> NanitClimateReading? {
+        guard let url = cloudWebSocketURL(cameraUID: cameraUID) else {
+            throw NanitAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(
+            "Nanit/767 CFNetwork/1498.700.2 Darwin/23.6.0",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        let socket = session.webSocketTask(with: request)
+        socket.resume()
+        defer {
+            socket.cancel(with: .normalClosure, reason: nil)
+        }
+
+        let requestID = Int32.random(in: 1...Int32.max)
+        let payload = NanitSensorWebSocketCodec.sensorDataRequest(requestID: requestID)
+        try await socket.send(.data(payload))
+
+        for _ in 0..<6 {
+            let message = try await Self.withTimeout(seconds: 12) {
+                try await socket.receive()
+            }
+
+            guard case .data(let data) = message else {
+                continue
+            }
+
+            if let reading = try NanitSensorWebSocketCodec.climateReading(
+                from: data,
+                matchingRequestID: requestID
+            ) {
+                return reading
+            }
+        }
+
+        return nil
+    }
+
     private func authRequest(body: [String: String]) async throws -> NanitTokens {
         var request = makeRequest(path: "/login", method: "POST")
         request.httpBody = try JSONEncoder().encode(body)
@@ -361,6 +404,260 @@ final class NanitAPIClient {
         }
 
         return "\(redacted.prefix(maxLength))... <truncated \(redacted.count - maxLength) chars>"
+    }
+
+    private static func withTimeout<T: Sendable>(
+        seconds: UInt64,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw NanitAPIError.transport("Nanit WebSocket request timed out.")
+            }
+
+            guard let result = try await group.next() else {
+                throw NanitAPIError.invalidResponse
+            }
+
+            group.cancelAll()
+            return result
+        }
+    }
+}
+
+enum NanitSensorWebSocketCodec {
+    private static let messageTypeRequest: UInt64 = 1
+    private static let messageTypeResponse: UInt64 = 2
+    private static let requestTypeSensorData: UInt64 = 12
+    private static let sensorTypeTemperature: UInt64 = 2
+    private static let sensorTypeHumidity: UInt64 = 3
+
+    static func sensorDataRequest(requestID: Int32) -> Data {
+        var getSensorData = Data()
+        getSensorData.appendVarintField(1, value: 1)
+
+        var request = Data()
+        request.appendVarintField(1, value: UInt64(requestID))
+        request.appendVarintField(2, value: requestTypeSensorData)
+        request.appendLengthDelimitedField(12, data: getSensorData)
+
+        var message = Data()
+        message.appendVarintField(1, value: messageTypeRequest)
+        message.appendLengthDelimitedField(2, data: request)
+        return message
+    }
+
+    static func climateReading(from data: Data, matchingRequestID requestID: Int32) throws -> NanitClimateReading? {
+        var reader = NanitProtobufReader(data: data)
+        var responseData: Data?
+        var isResponse = false
+
+        while let field = try reader.nextField() {
+            if field.number == 1, field.varintValue == messageTypeResponse {
+                isResponse = true
+            } else if field.number == 3 {
+                responseData = field.dataValue
+            }
+        }
+
+        guard isResponse, let responseData else {
+            return nil
+        }
+
+        var responseReader = NanitProtobufReader(data: responseData)
+        var responseRequestID: Int32?
+        var requestType: UInt64?
+        var statusCode: UInt64?
+        var temperatureCelsius: Double?
+        var humidityPercent: Double?
+
+        while let field = try responseReader.nextField() {
+            switch field.number {
+            case 1:
+                responseRequestID = field.varintValue.flatMap { Int32(exactly: $0) }
+            case 2:
+                requestType = field.varintValue
+            case 3:
+                statusCode = field.varintValue
+            case 9:
+                guard let sensorData = field.dataValue else {
+                    break
+                }
+
+                let sensor = try parseSensorData(sensorData)
+                switch sensor.type {
+                case sensorTypeTemperature:
+                    temperatureCelsius = sensor.value
+                case sensorTypeHumidity:
+                    humidityPercent = sensor.value
+                default:
+                    break
+                }
+            default:
+                break
+            }
+        }
+
+        guard responseRequestID == requestID,
+              requestType == requestTypeSensorData,
+              statusCode == 0 || statusCode == 200
+        else {
+            return nil
+        }
+
+        guard temperatureCelsius != nil || humidityPercent != nil else {
+            return nil
+        }
+
+        return NanitClimateReading(
+            temperatureCelsius: temperatureCelsius,
+            humidityPercent: humidityPercent
+        )
+    }
+
+    private static func parseSensorData(_ data: Data) throws -> (type: UInt64, value: Double?) {
+        var reader = NanitProtobufReader(data: data)
+        var sensorType: UInt64?
+        var value: Int64?
+        var valueMilli: Int64?
+
+        while let field = try reader.nextField() {
+            switch field.number {
+            case 1:
+                sensorType = field.varintValue
+            case 3:
+                value = field.varintValue.flatMap { Int64(exactly: $0) }
+            case 6:
+                valueMilli = field.varintValue.flatMap { Int64(exactly: $0) }
+            default:
+                break
+            }
+        }
+
+        guard let sensorType else {
+            throw NanitAPIError.invalidResponse
+        }
+
+        if let valueMilli {
+            return (sensorType, Double(valueMilli) / 1000)
+        }
+
+        if let value {
+            return (sensorType, Double(value))
+        }
+
+        return (sensorType, nil)
+    }
+}
+
+private struct NanitProtobufField {
+    let number: Int
+    let wireType: Int
+    let varintValue: UInt64?
+    let dataValue: Data?
+}
+
+private struct NanitProtobufReader {
+    private let bytes: [UInt8]
+    private var offset = 0
+
+    init(data: Data) {
+        bytes = Array(data)
+    }
+
+    mutating func nextField() throws -> NanitProtobufField? {
+        guard offset < bytes.count else {
+            return nil
+        }
+
+        let key = try readVarint()
+        let number = Int(key >> 3)
+        let wireType = Int(key & 0x7)
+
+        switch wireType {
+        case 0:
+            return NanitProtobufField(
+                number: number,
+                wireType: wireType,
+                varintValue: try readVarint(),
+                dataValue: nil
+            )
+        case 1:
+            try skip(byteCount: 8)
+            return NanitProtobufField(number: number, wireType: wireType, varintValue: nil, dataValue: nil)
+        case 2:
+            let length = Int(try readVarint())
+            let value = try readData(byteCount: length)
+            return NanitProtobufField(number: number, wireType: wireType, varintValue: nil, dataValue: value)
+        case 5:
+            try skip(byteCount: 4)
+            return NanitProtobufField(number: number, wireType: wireType, varintValue: nil, dataValue: nil)
+        default:
+            throw NanitAPIError.invalidResponse
+        }
+    }
+
+    private mutating func readVarint() throws -> UInt64 {
+        var result: UInt64 = 0
+        var shift: UInt64 = 0
+
+        while offset < bytes.count, shift < 64 {
+            let byte = bytes[offset]
+            offset += 1
+            result |= UInt64(byte & 0x7f) << shift
+
+            if byte & 0x80 == 0 {
+                return result
+            }
+
+            shift += 7
+        }
+
+        throw NanitAPIError.invalidResponse
+    }
+
+    private mutating func readData(byteCount: Int) throws -> Data {
+        guard byteCount >= 0, offset + byteCount <= bytes.count else {
+            throw NanitAPIError.invalidResponse
+        }
+
+        let range = offset..<(offset + byteCount)
+        offset += byteCount
+        return Data(bytes[range])
+    }
+
+    private mutating func skip(byteCount: Int) throws {
+        guard byteCount >= 0, offset + byteCount <= bytes.count else {
+            throw NanitAPIError.invalidResponse
+        }
+
+        offset += byteCount
+    }
+}
+
+private extension Data {
+    mutating func appendVarintField(_ number: Int, value: UInt64) {
+        appendVarint(UInt64(number << 3))
+        appendVarint(value)
+    }
+
+    mutating func appendLengthDelimitedField(_ number: Int, data: Data) {
+        appendVarint(UInt64(number << 3 | 2))
+        appendVarint(UInt64(data.count))
+        append(data)
+    }
+
+    mutating func appendVarint(_ value: UInt64) {
+        var remaining = value
+        while remaining >= 0x80 {
+            append(UInt8(remaining & 0x7f) | 0x80)
+            remaining >>= 7
+        }
+        append(UInt8(remaining))
     }
 }
 
