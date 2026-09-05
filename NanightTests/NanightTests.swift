@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 import Testing
 @testable import Nanight
@@ -128,6 +129,62 @@ struct NanightTests {
 
         #expect(reading?.temperatureCelsius == 22.3)
         #expect(reading?.humidityPercent == 45.5)
+    }
+
+    @Test func videoFrameLivenessRequiresFreshDistinctFrames() {
+        var tracker = NanightVideoFrameTracker(staleAfter: 3)
+        let firstFrame = CMTime(value: 1, timescale: 10)
+        let secondFrame = CMTime(value: 2, timescale: 10)
+
+        #expect(tracker.state(at: 100) == .waitingForFrames)
+
+        tracker.recordFrame(presentationTimeStamp: firstFrame, at: 100)
+        #expect(tracker.state(at: 100) == .waitingForFrames)
+
+        tracker.recordFrame(presentationTimeStamp: firstFrame, at: 101)
+        #expect(tracker.state(at: 101) == .waitingForFrames)
+
+        tracker.recordFrame(presentationTimeStamp: secondFrame, at: 101)
+        #expect(tracker.state(at: 101) == .live)
+        #expect(tracker.state(at: 104.1) == .stalled)
+    }
+
+    @Test func videoFrameLivenessStallsWhenNoInitialFramesArrive() {
+        var tracker = NanightVideoFrameTracker(staleAfter: 3, initialFrameTimeout: 10)
+
+        tracker.startMonitoring(at: 100)
+
+        #expect(tracker.state(at: 110) == .waitingForFrames)
+        #expect(tracker.state(at: 110.1) == .stalled)
+    }
+
+    @Test func videoFrameLivenessRequiresTwoFreshFramesToRecover() {
+        var tracker = NanightVideoFrameTracker(staleAfter: 3)
+
+        tracker.recordFrame(presentationTimeStamp: CMTime(value: 1, timescale: 10), at: 100)
+        tracker.recordFrame(presentationTimeStamp: CMTime(value: 2, timescale: 10), at: 100.1)
+        #expect(tracker.state(at: 104) == .stalled)
+
+        tracker.recordFrame(presentationTimeStamp: CMTime(value: 3, timescale: 10), at: 104)
+        #expect(tracker.state(at: 104) == .stalled)
+
+        tracker.recordFrame(presentationTimeStamp: CMTime(value: 4, timescale: 10), at: 104.1)
+        #expect(tracker.state(at: 104.1) == .live)
+    }
+
+    @Test func automaticReconnectPolicyBacksOffAndCapsItsDelay() {
+        #expect(NanightAutomaticReconnectPolicy.delay(forAttempt: 0) == 1)
+        #expect(NanightAutomaticReconnectPolicy.delay(forAttempt: 1) == 2)
+        #expect(NanightAutomaticReconnectPolicy.delay(forAttempt: 2) == 4)
+        #expect(NanightAutomaticReconnectPolicy.delay(forAttempt: 5) == 30)
+        #expect(NanightAutomaticReconnectPolicy.delay(forAttempt: 20) == 30)
+        #expect(
+            NanightAutomaticReconnectPolicy.delay(
+                forAttempt: 0,
+                secondsSinceLastReconnect: 4
+            ) == 6
+        )
+        #expect(NanightAutomaticReconnectPolicy.nextAttempt(after: 5) == 5)
     }
 
     private func sensorDataResponse(

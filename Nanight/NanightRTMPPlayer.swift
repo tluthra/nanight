@@ -1,23 +1,116 @@
 @preconcurrency import AVKit
 import AudioToolbox
 import Combine
+import CoreMedia
+import Foundation
 import HaishinKit
 import RTMPHaishinKit
 import SwiftUI
+
+enum NanightVideoFrameState: Equatable {
+    case waitingForFrames
+    case live
+    case stalled
+}
+
+struct NanightVideoFrameTracker {
+    let staleAfter: TimeInterval
+    let initialFrameTimeout: TimeInterval
+
+    private var monitoringStartedAt: TimeInterval?
+    private var lastPresentationTimeStamp: CMTime?
+    private var previousFrameUptime: TimeInterval?
+    private var latestFrameUptime: TimeInterval?
+
+    init(staleAfter: TimeInterval = 3, initialFrameTimeout: TimeInterval = 10) {
+        self.staleAfter = staleAfter
+        self.initialFrameTimeout = initialFrameTimeout
+    }
+
+    mutating func startMonitoring(at uptime: TimeInterval) {
+        monitoringStartedAt = uptime
+    }
+
+    mutating func recordFrame(presentationTimeStamp: CMTime, at uptime: TimeInterval) {
+        if presentationTimeStamp.isValid {
+            if let lastPresentationTimeStamp,
+               CMTimeCompare(lastPresentationTimeStamp, presentationTimeStamp) == 0 {
+                return
+            }
+            lastPresentationTimeStamp = presentationTimeStamp
+        }
+
+        previousFrameUptime = latestFrameUptime
+        latestFrameUptime = uptime
+    }
+
+    func state(at uptime: TimeInterval) -> NanightVideoFrameState {
+        guard let latestFrameUptime else {
+            if let monitoringStartedAt,
+               uptime - monitoringStartedAt > initialFrameTimeout {
+                return .stalled
+            }
+            return .waitingForFrames
+        }
+
+        guard let previousFrameUptime else {
+            return uptime - latestFrameUptime > staleAfter ? .stalled : .waitingForFrames
+        }
+
+        if uptime - latestFrameUptime <= staleAfter,
+           uptime - previousFrameUptime <= staleAfter {
+            return .live
+        }
+
+        return .stalled
+    }
+}
+
+enum NanightAutomaticReconnectPolicy {
+    static let stableLiveInterval: TimeInterval = 10
+    private static let minimumReconnectInterval: TimeInterval = 10
+    private static let delays: [TimeInterval] = [1, 2, 4, 8, 15, 30]
+
+    static func delay(
+        forAttempt attempt: Int,
+        secondsSinceLastReconnect: TimeInterval? = nil
+    ) -> TimeInterval {
+        let attemptIndex = min(max(attempt, 0), delays.count - 1)
+        let backoffDelay = delays[attemptIndex]
+        guard let secondsSinceLastReconnect else {
+            return backoffDelay
+        }
+
+        let cooldownDelay = max(0, minimumReconnectInterval - max(0, secondsSinceLastReconnect))
+        return max(backoffDelay, cooldownDelay)
+    }
+
+    static func nextAttempt(after attempt: Int) -> Int {
+        min(attempt + 1, delays.count - 1)
+    }
+}
 
 @MainActor
 final class NanightRTMPPlayer: ObservableObject {
     @Published private(set) var readyStateText = "Idle"
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var videoFrameState: NanightVideoFrameState = .waitingForFrames
 
     private var view: PiPHKView?
     private var connection: RTMPConnection?
     private var stream: RTMPStream?
     private var audioEngine: AVAudioEngine?
     private var audioPlayer: AudioPlayer?
+    private var automaticReconnectTask: Task<Void, Never>?
+    private var automaticReconnectAttempt = 0
+    private var didResetReconnectBackoffForLiveRun = false
+    private var lastAutomaticReconnectAt: TimeInterval?
+    private var liveSinceUptime: TimeInterval?
     private var connectTask: Task<Void, Never>?
+    private var frameWatchdogTask: Task<Void, Never>?
     private var statusTasks: [Task<Void, Never>] = []
     private var currentURL: URL?
+    private var frameTracker = NanightVideoFrameTracker()
     private var isMuted = true
     private var playbackGeneration = 0
 
@@ -29,6 +122,7 @@ final class NanightRTMPPlayer: ObservableObject {
         lastErrorMessage = nil
 
         if paused {
+            resetAutomaticReconnectBackoff()
             let session = invalidatePlayback()
             currentURL = url
             readyStateText = "RTMPS stream ready"
@@ -45,6 +139,7 @@ final class NanightRTMPPlayer: ObservableObject {
             return
         }
 
+        resetAutomaticReconnectBackoff()
         let session = invalidatePlayback()
         currentURL = url
         isMuted = muted
@@ -53,8 +148,14 @@ final class NanightRTMPPlayer: ObservableObject {
         playbackGeneration += 1
         let generation = playbackGeneration
         connectTask = Task { [weak self] in
-            await self?.closeSession(session)
-            await self?.connect(url: url, generation: generation)
+            guard let self else {
+                return
+            }
+            await self.closeSession(session)
+            guard !Task.isCancelled, self.isCurrentPlayback(generation) else {
+                return
+            }
+            await self.connect(url: url, generation: generation)
         }
     }
 
@@ -88,6 +189,7 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     func close() {
+        resetAutomaticReconnectBackoff()
         let session = invalidatePlayback()
         Task {
             await closeSession(session)
@@ -103,17 +205,31 @@ final class NanightRTMPPlayer: ObservableObject {
         playbackGeneration += 1
         let generation = playbackGeneration
         connectTask = Task { [weak self] in
-            await self?.closeSession(session)
-            await self?.connect(url: url, generation: generation)
+            guard let self else {
+                return
+            }
+            await self.closeSession(session)
+            guard !Task.isCancelled, self.isCurrentPlayback(generation) else {
+                return
+            }
+            await self.connect(url: url, generation: generation)
         }
     }
 
     private func invalidatePlayback() -> NanightRTMPPlaybackSession {
         playbackGeneration += 1
+        automaticReconnectTask?.cancel()
+        automaticReconnectTask = nil
         connectTask?.cancel()
         connectTask = nil
+        frameWatchdogTask?.cancel()
+        frameWatchdogTask = nil
         statusTasks.forEach { $0.cancel() }
         statusTasks.removeAll()
+        liveSinceUptime = nil
+        didResetReconnectBackoffForLiveRun = false
+        frameTracker = NanightVideoFrameTracker()
+        videoFrameState = .waitingForFrames
 
         let session = NanightRTMPPlaybackSession(
             stream: stream,
@@ -129,6 +245,7 @@ final class NanightRTMPPlayer: ObservableObject {
 
     private func closeSession(_ session: NanightRTMPPlaybackSession) async {
         if let stream = session.stream {
+            await stream.removeOutput(self)
             await stream.attachAudioPlayer(nil)
             do {
                 _ = try await stream.close()
@@ -151,6 +268,10 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     private func connect(url: URL, generation: Int) async {
+        guard !Task.isCancelled, isCurrentPlayback(generation) else {
+            return
+        }
+
         readyStateText = "Connecting RTMPS stream"
         NanightLog.info("HaishinKit connecting to RTMPS stream")
 
@@ -167,9 +288,10 @@ final class NanightRTMPPlayer: ObservableObject {
 
             connection = newConnection
             stream = newStream
+            await newStream.addOutput(self)
             await configureAudio(muted: isMuted, stream: newStream)
 
-            observeStatus(connection: newConnection, stream: newStream)
+            observeStatus(connection: newConnection, stream: newStream, generation: generation)
 
             _ = try await newConnection.connect(target.command)
             guard isCurrentPlayback(generation) else {
@@ -183,6 +305,7 @@ final class NanightRTMPPlayer: ObservableObject {
                 await closeInactiveSession(stream: newStream, connection: newConnection)
                 return
             }
+            startFrameWatchdog(generation: generation)
             await applyAudioState(to: newStream, generation: generation)
             await attachVideoView(to: newStream)
             readyStateText = "RTMPS stream open"
@@ -194,11 +317,140 @@ final class NanightRTMPPlayer: ObservableObject {
             lastErrorMessage = error.localizedDescription
             readyStateText = "RTMPS playback failed"
             NanightLog.error("HaishinKit RTMPS playback failed: \(error.localizedDescription)")
+
+            if !(error is NanightRTMPPlayerError) {
+                videoFrameState = .stalled
+                scheduleAutomaticReconnect()
+            }
         }
     }
 
     private func isCurrentPlayback(_ generation: Int) -> Bool {
         generation == playbackGeneration
+    }
+
+    private func startFrameWatchdog(generation: Int) {
+        frameWatchdogTask?.cancel()
+        frameTracker.startMonitoring(at: ProcessInfo.processInfo.systemUptime)
+        frameWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                } catch {
+                    return
+                }
+
+                guard let self, self.isCurrentPlayback(generation) else {
+                    return
+                }
+                self.refreshVideoFrameState()
+            }
+        }
+    }
+
+    private func receivedVideoFrame(presentationTimeStamp: CMTime, from stream: RTMPStream) {
+        guard self.stream === stream else {
+            return
+        }
+
+        frameTracker.recordFrame(
+            presentationTimeStamp: presentationTimeStamp,
+            at: ProcessInfo.processInfo.systemUptime
+        )
+        refreshVideoFrameState()
+    }
+
+    private func refreshVideoFrameState() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let nextState = frameTracker.state(at: now)
+
+        if nextState == .live {
+            if videoFrameState != .live {
+                liveSinceUptime = now
+                didResetReconnectBackoffForLiveRun = false
+            } else if !didResetReconnectBackoffForLiveRun,
+                      let liveSinceUptime,
+                      now - liveSinceUptime >= NanightAutomaticReconnectPolicy.stableLiveInterval {
+                automaticReconnectAttempt = 0
+                lastAutomaticReconnectAt = nil
+                didResetReconnectBackoffForLiveRun = true
+                NanightLog.info("HaishinKit automatic reconnect backoff reset after stable video")
+            }
+        } else {
+            liveSinceUptime = nil
+            didResetReconnectBackoffForLiveRun = false
+        }
+
+        guard nextState != videoFrameState else {
+            return
+        }
+
+        videoFrameState = nextState
+        switch nextState {
+        case .waitingForFrames:
+            break
+        case .live:
+            automaticReconnectTask?.cancel()
+            automaticReconnectTask = nil
+            NanightLog.info("HaishinKit video frames are live")
+        case .stalled:
+            NanightLog.warning("HaishinKit video frames stalled")
+            scheduleAutomaticReconnect()
+        }
+    }
+
+    private func scheduleAutomaticReconnect() {
+        guard automaticReconnectTask == nil,
+              let url = currentURL
+        else {
+            return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let secondsSinceLastReconnect = lastAutomaticReconnectAt.map { now - $0 }
+        let delay = NanightAutomaticReconnectPolicy.delay(
+            forAttempt: automaticReconnectAttempt,
+            secondsSinceLastReconnect: secondsSinceLastReconnect
+        )
+        let attempt = automaticReconnectAttempt + 1
+        automaticReconnectAttempt = NanightAutomaticReconnectPolicy.nextAttempt(
+            after: automaticReconnectAttempt
+        )
+        let generation = playbackGeneration
+        NanightLog.info("HaishinKit scheduling automatic reconnect attempt \(attempt) in \(Int(delay))s")
+
+        automaticReconnectTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+
+            guard let self else {
+                return
+            }
+
+            guard self.isCurrentPlayback(generation),
+                  self.videoFrameState == .stalled,
+                  self.currentURL == url
+            else {
+                self.automaticReconnectTask = nil
+                return
+            }
+
+            let muted = self.isMuted
+            self.automaticReconnectTask = nil
+            self.lastAutomaticReconnectAt = ProcessInfo.processInfo.systemUptime
+            NanightLog.info("HaishinKit automatically reconnecting stalled video")
+            self.restart(url: url, muted: muted)
+        }
+    }
+
+    private func resetAutomaticReconnectBackoff() {
+        automaticReconnectAttempt = 0
+        lastAutomaticReconnectAt = nil
+        liveSinceUptime = nil
+        didResetReconnectBackoffForLiveRun = false
     }
 
     private func configureAudio(muted: Bool, stream: RTMPStream) async {
@@ -255,6 +507,7 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     private func closeInactiveSession(stream: RTMPStream, connection: RTMPConnection) async {
+        await stream.removeOutput(self)
         await stream.attachAudioPlayer(nil)
 
         do {
@@ -270,13 +523,19 @@ final class NanightRTMPPlayer: ObservableObject {
         }
     }
 
-    private func observeStatus(connection: RTMPConnection, stream: RTMPStream) {
+    private func observeStatus(connection: RTMPConnection, stream: RTMPStream, generation: Int) {
         statusTasks.forEach { $0.cancel() }
         statusTasks = [
             Task { [weak self] in
                 for await status in await connection.status {
                     await MainActor.run {
-                        self?.readyStateText = status.code
+                        guard let self,
+                              self.isCurrentPlayback(generation),
+                              self.connection === connection
+                        else {
+                            return
+                        }
+                        self.readyStateText = status.code
                         NanightLog.info("HaishinKit connection status: \(status.code)")
                     }
                 }
@@ -284,7 +543,13 @@ final class NanightRTMPPlayer: ObservableObject {
             Task { [weak self] in
                 for await status in await stream.status {
                     await MainActor.run {
-                        self?.readyStateText = status.code
+                        guard let self,
+                              self.isCurrentPlayback(generation),
+                              self.stream === stream
+                        else {
+                            return
+                        }
+                        self.readyStateText = status.code
                         NanightLog.info("HaishinKit stream status: \(status.code)")
                     }
                 }
@@ -300,6 +565,26 @@ final class NanightRTMPPlayer: ObservableObject {
 
         await stream.addOutput(view)
         NanightLog.info("HaishinKit video view attached to RTMPS stream")
+    }
+}
+
+extension NanightRTMPPlayer: StreamOutput {
+    nonisolated func stream(
+        _ stream: some StreamConvertible,
+        didOutput audio: AVAudioBuffer,
+        when: AVAudioTime
+    ) {
+    }
+
+    nonisolated func stream(_ stream: some StreamConvertible, didOutput video: CMSampleBuffer) {
+        guard let stream = stream as? RTMPStream else {
+            return
+        }
+
+        let presentationTimeStamp = video.presentationTimeStamp
+        Task { @MainActor [weak self] in
+            self?.receivedVideoFrame(presentationTimeStamp: presentationTimeStamp, from: stream)
+        }
     }
 }
 

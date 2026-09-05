@@ -1,9 +1,48 @@
 import AVKit
+import Combine
 import HaishinKit
 import SwiftUI
 
+@MainActor
+final class NanightVideoInteraction: ObservableObject {
+    static let surfaceSize = CGSize(width: 520, height: 292)
+
+    @Published private(set) var scale: CGFloat = 1
+    @Published private(set) var offset: CGSize = .zero
+    var viewportSize: CGSize {
+        Self.surfaceSize
+    }
+
+    func magnify(by magnification: CGFloat) {
+        scale = min(max(scale + magnification, 1), 4)
+        offset = clampedOffset(offset)
+    }
+
+    func pan(by delta: CGSize) {
+        let candidate = CGSize(
+            width: offset.width + delta.width,
+            height: offset.height + delta.height
+        )
+        offset = clampedOffset(candidate)
+    }
+
+    private func clampedOffset(_ candidate: CGSize) -> CGSize {
+        guard scale > 1 else {
+            return .zero
+        }
+
+        let maxX = viewportSize.width * (scale - 1) / 2
+        let maxY = viewportSize.height * (scale - 1) / 2
+        return CGSize(
+            width: min(max(candidate.width, -maxX), maxX),
+            height: min(max(candidate.height, -maxY), maxY)
+        )
+    }
+}
+
 struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
+    let videoInteraction: NanightVideoInteraction
 
     var body: some View {
         Group {
@@ -21,7 +60,7 @@ struct NanightMenuView: View {
                     .frame(width: 360)
                     .padding(16)
             case .signedIn, .offline:
-                MonitorView(model: model)
+                MonitorView(model: model, videoInteraction: videoInteraction)
             }
         }
     }
@@ -122,10 +161,10 @@ private struct BusyGlyph: View {
 
 private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
-    private let sourceVideoSize = CGSize(width: 520, height: 292)
+    @ObservedObject var videoInteraction: NanightVideoInteraction
 
     var body: some View {
-        let viewportSize = model.videoViewportSize
+        let viewportSize = videoInteraction.viewportSize
 
         ZStack(alignment: .topLeading) {
             ZStack {
@@ -138,7 +177,9 @@ private struct MonitorView: View {
                         PlaceholderVideoView(message: model.streamStatusText)
                     }
                 }
-                .frame(width: sourceVideoSize.width, height: sourceVideoSize.height)
+                .frame(width: NanightVideoInteraction.surfaceSize.width, height: NanightVideoInteraction.surfaceSize.height)
+                .scaleEffect(videoInteraction.scale)
+                .offset(videoInteraction.offset)
                 .allowsHitTesting(false)
             }
             .frame(width: viewportSize.width, height: viewportSize.height)
@@ -153,7 +194,7 @@ private struct MonitorView: View {
                         if let rtmpPlayer = model.rtmpPlayer {
                             RTMPLiveStatusRow(player: rtmpPlayer, climate: model.climate)
                         } else {
-                            LiveStatusRow(isConnecting: false, climate: model.climate)
+                            LiveStatusRow(status: .live, climate: model.climate)
                         }
                     }
                     .foregroundStyle(.white)
@@ -217,14 +258,14 @@ private struct RTMPLiveStatusRow: View {
 
     var body: some View {
         LiveStatusRow(
-            isConnecting: player.readyStateText == "Connecting RTMPS stream",
+            status: player.videoFrameState,
             climate: climate
         )
     }
 }
 
 private struct LiveStatusRow: View {
-    let isConnecting: Bool
+    let status: NanightVideoFrameState
     let climate: NanitClimateReading?
 
     private let formatter: DateFormatter = {
@@ -237,10 +278,10 @@ private struct LiveStatusRow: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             HStack(spacing: 6) {
                 Circle()
-                    .fill(isConnecting ? .yellow : .red)
+                    .fill(status == .live ? .red : .yellow)
                     .frame(width: 6, height: 6)
 
-                Text(isConnecting ? "Connecting" : "Live")
+                Text(statusText)
 
                 Text(formatter.string(from: context.date))
                     .monospacedDigit()
@@ -259,6 +300,17 @@ private struct LiveStatusRow: View {
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.78))
+        }
+    }
+
+    private var statusText: String {
+        switch status {
+        case .waitingForFrames:
+            return "Connecting"
+        case .live:
+            return "Live"
+        case .stalled:
+            return "Stalled"
         }
     }
 

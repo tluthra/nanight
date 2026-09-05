@@ -45,11 +45,6 @@ final class NanightAppModel: ObservableObject {
     private var lastNotifiedSoundAt: Date?
     private var wasOffline = false
     private var isVideoVisible = false
-    private let videoSurfaceSize = CGSize(width: 520, height: 292)
-
-    var videoViewportSize: CGSize {
-        videoSurfaceSize
-    }
 
     convenience init() {
         self.init(
