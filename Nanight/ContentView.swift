@@ -220,11 +220,12 @@ private struct MonitorView: View {
                         Spacer()
 
                         OverlayButton(
-                            systemName: isFloating ? "pip.exit" : "pip.enter",
-                            help: isFloating ? "Unfloat camera" : "Float camera",
+                            systemName: isFloating ? "pin.fill" : "pin",
+                            help: isFloating ? "Unpin window" : "Pin window",
+                            isSelected: isFloating,
                             action: toggleFloating
                         )
-                        .accessibilityLabel(isFloating ? "Unfloat camera" : "Float camera")
+                        .accessibilityLabel(isFloating ? "Unpin window" : "Pin window")
                     }
                 }
                 .padding(14)
@@ -451,6 +452,7 @@ private struct OverlayButton: View {
     let systemName: String
     let help: String
     var foregroundColor: Color = .white
+    var isSelected = false
     let action: () -> Void
 
     var body: some View {
@@ -459,11 +461,12 @@ private struct OverlayButton: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(foregroundColor)
                 .frame(width: 30, height: 30)
-                .background(Color.black.opacity(0.42))
+                .background(isSelected ? Color.blue : Color.black.opacity(0.42))
                 .clipShape(Circle())
         }
         .buttonStyle(.borderless)
         .help(help)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
