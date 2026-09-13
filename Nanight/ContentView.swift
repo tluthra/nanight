@@ -3,43 +3,6 @@ import Combine
 import HaishinKit
 import SwiftUI
 
-@MainActor
-final class NanightVideoInteraction: ObservableObject {
-    static let surfaceSize = CGSize(width: 520, height: 292)
-
-    @Published private(set) var scale: CGFloat = 1
-    @Published private(set) var offset: CGSize = .zero
-    var viewportSize: CGSize {
-        Self.surfaceSize
-    }
-
-    func magnify(by magnification: CGFloat) {
-        scale = min(max(scale + magnification, 1), 4)
-        offset = clampedOffset(offset)
-    }
-
-    func pan(by delta: CGSize) {
-        let candidate = CGSize(
-            width: offset.width + delta.width,
-            height: offset.height + delta.height
-        )
-        offset = clampedOffset(candidate)
-    }
-
-    private func clampedOffset(_ candidate: CGSize) -> CGSize {
-        guard scale > 1 else {
-            return .zero
-        }
-
-        let maxX = viewportSize.width * (scale - 1) / 2
-        let maxY = viewportSize.height * (scale - 1) / 2
-        return CGSize(
-            width: min(max(candidate.width, -maxX), maxX),
-            height: min(max(candidate.height, -maxY), maxY)
-        )
-    }
-}
-
 struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
     let videoInteraction: NanightVideoInteraction
@@ -178,7 +141,8 @@ private struct MonitorView: View {
                     }
                 }
                 .frame(width: NanightVideoInteraction.surfaceSize.width, height: NanightVideoInteraction.surfaceSize.height)
-                .scaleEffect(videoInteraction.scale)
+                .scaleEffect(videoInteraction.displayScale)
+                .rotationEffect(.degrees(videoInteraction.rotationDegrees))
                 .offset(videoInteraction.offset)
                 .allowsHitTesting(false)
             }
@@ -249,6 +213,12 @@ private struct MonitorView: View {
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .onAppear {
+            NanightLog.gesture("VIEW appeared \(videoInteraction.diagnosticDescription)")
+        }
+        .onChange(of: videoInteraction.diagnosticDescription) { description in
+            NanightLog.gesture("VIEW observed \(description)")
+        }
     }
 }
 

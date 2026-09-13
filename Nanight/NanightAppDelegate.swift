@@ -12,15 +12,18 @@ enum NanightMenuBarIconState: Equatable {
     case motionAndSound
 }
 
-final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSGestureRecognizerDelegate {
+final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @MainActor let model = NanightAppModel()
     @MainActor private let videoInteraction = NanightVideoInteraction()
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var cancellable: AnyCancellable?
-    private var videoMagnificationGestureRecognizer: NSMagnificationGestureRecognizer?
-    private var localVideoPanEventMonitor: Any?
+    private lazy var videoGestureInput = NanightVideoGestureInput(interaction: videoInteraction)
+    private var localVideoGestureEventMonitor: Any?
+    private var videoGestureHeartbeat: Task<Void, Never>?
+    private var gestureEventsReceived = 0
+    private var gestureEventsHandled = 0
     private var localOutsideClickEventMonitor: Any?
     private var globalOutsideClickEventMonitor: Any?
     private var popoverDebugSequence = 0
@@ -45,7 +48,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             }
         }
 
-        installVideoPanEventMonitor()
+        installVideoGestureEventMonitor()
+        NanightLog.gesture("BOOT revision=raw-events-v2 pid=\(ProcessInfo.processInfo.processIdentifier) app=\(Bundle.main.bundleURL.path)")
     }
 
     @MainActor
@@ -101,7 +105,12 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.delegate = self
         popover.contentSize = preferredContentSize
         NanightLog.info("Popover #\(popoverDebugSequence) toggle \(createdPopover ? "creating" : "reusing") popover contentSize=\(popover.contentSize.debugDescription) preferredContentSize=\(preferredContentSize.debugDescription) state=\(model.connectionState) viewport=\(videoInteraction.viewportSize.debugDescription)")
+        // A menu-bar popover can be visible while Xcode or another app still owns
+        // keyboard/gesture focus. Claim focus before asking for trackpad input.
+        NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+        logVideoGestureContext("SHOW returned")
         NanightLog.info("Popover #\(popoverDebugSequence) show returned isShown=\(popover.isShown) \(popover.debugWindowDescription)")
     }
 
@@ -112,7 +121,12 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
 
         NanightLog.info("Popover #\(popoverDebugSequence) didShow contentSize=\(shownPopover.contentSize.debugDescription) \(shownPopover.debugWindowDescription)")
-        installVideoGestureRecognizers(in: shownPopover)
+        installVideoGestureEventMonitor()
+        videoGestureInput.reset()
+        gestureEventsReceived = 0
+        gestureEventsHandled = 0
+        logVideoGestureContext("OPEN revision=raw-events-v2")
+        startVideoGestureHeartbeat()
         installOutsideClickEventMonitors(for: shownPopover)
         updateVideoContainerSize(animated: false)
         model.setVideoVisible(true)
@@ -123,7 +137,11 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     func popoverDidClose(_ notification: Notification) {
         let closedPopover = notification.object as? NSPopover
         NanightLog.info("Popover #\(popoverDebugSequence) didClose notificationPopoverShown=\(closedPopover?.isShown == true) storedPopoverShown=\(popover?.isShown == true)")
-        removeVideoGestureRecognizers()
+        videoGestureHeartbeat?.cancel()
+        videoGestureHeartbeat = nil
+        videoGestureInput.reset()
+        settleVideoRotation(animated: false)
+        logVideoGestureContext("CLOSE")
         model.setVideoVisible(false)
         removeOutsideClickEventMonitors()
         NanightLog.info("Popover #\(popoverDebugSequence) didClose cleanup completed retainedPopover=\(popover != nil)")
@@ -141,112 +159,100 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     @MainActor
-    private func installVideoGestureRecognizers(in popover: NSPopover) {
-        guard let gestureView = popover.contentViewController?.view.window?.contentView else {
-            NanightLog.warning("Video gesture recognizers skipped because the popover window is unavailable")
-            return
-        }
-
-        removeVideoGestureRecognizers()
-
-        let magnificationRecognizer = NSMagnificationGestureRecognizer(
-            target: self,
-            action: #selector(handleVideoMagnification(_:))
-        )
-        magnificationRecognizer.delegate = self
-
-        gestureView.addGestureRecognizer(magnificationRecognizer)
-        videoMagnificationGestureRecognizer = magnificationRecognizer
-        NanightLog.info("Installed native video gesture recognizers window=\(gestureView.window?.windowNumber ?? -1)")
-    }
-
-    @MainActor
-    private func removeVideoGestureRecognizers() {
-        if let recognizer = videoMagnificationGestureRecognizer {
-            recognizer.view?.removeGestureRecognizer(recognizer)
-            videoMagnificationGestureRecognizer = nil
-        }
-    }
-
-    @objc
-    @MainActor
-    private func handleVideoMagnification(_ recognizer: NSMagnificationGestureRecognizer) {
-        let magnification = recognizer.magnification
-        recognizer.magnification = 0
-
-        guard videoGesturesAreActive else {
-            return
-        }
-
-        switch recognizer.state {
-        case .began:
-            NanightLog.info("Video magnification gesture began window=\(recognizer.view?.window?.windowNumber ?? -1)")
-            videoInteraction.magnify(by: magnification)
-        case .changed, .ended:
-            videoInteraction.magnify(by: magnification)
-        case .possible, .cancelled, .failed:
-            break
-        @unknown default:
-            break
-        }
-    }
-
-    @MainActor
-    func gestureRecognizer(
-        _ gestureRecognizer: NSGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
-    ) -> Bool {
-        true
-    }
-
-    @MainActor
     private var videoGesturesAreActive: Bool {
-        guard popover?.isShown == true else {
-            return false
-        }
-
+        guard popover?.isShown == true else { return false }
         switch model.connectionState {
-        case .signedIn, .offline:
-            return true
-        case .signedOut, .authExpired, .mfaRequired, .restoring:
-            return false
+        case .signedIn, .offline: return true
+        case .signedOut, .authExpired, .mfaRequired, .restoring: return false
         }
     }
 
     @MainActor
-    private func installVideoPanEventMonitor() {
-        guard localVideoPanEventMonitor == nil else {
-            return
+    private func settleVideoRotation(animated: Bool) {
+        guard !videoGestureInput.isTransforming else { return }
+        let animate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let before = videoInteraction.diagnosticDescription
+        withAnimation(animate ? .easeInOut(duration: NanightVideoInteraction.settlingDuration) : nil) {
+            videoInteraction.snapRotation()
         }
+        NanightLog.gesture("SNAP animated=\(animate) before={\(before)} after={\(videoInteraction.diagnosticDescription)}")
+        updateVideoContainerSize(animated: animate)
+    }
 
-        localVideoPanEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self,
-                  let popover = self.popover,
-                  popover.isShown,
-                  event.window === popover.contentViewController?.view.window
-            else {
+    @MainActor
+    private func installVideoGestureEventMonitor() {
+        guard localVideoGestureEventMonitor == nil else { return }
+        let types: NSEvent.EventTypeMask = [.magnify, .rotate, .scrollWheel, .beginGesture, .endGesture, .gesture, .swipe]
+        localVideoGestureEventMonitor = NSEvent.addLocalMonitorForEvents(matching: types) { [weak self] event in
+            guard let self, let popover = self.popover, popover.isShown,
+                  let view = popover.contentViewController?.view, let window = view.window else { return event }
+
+            self.gestureEventsReceived += 1
+            let sequence = self.gestureEventsReceived
+            let phasedTypes: [NSEvent.EventType] = [.magnify, .rotate, .scrollWheel]
+            let phase: NSEvent.Phase = phasedTypes.contains(event.type) ? event.phase : []
+            let momentum: NSEvent.Phase = event.type == .scrollWheel ? event.momentumPhase : []
+            let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            let pointer = view.convert(mouseInWindow, from: nil)
+            let inside = view.bounds.contains(pointer)
+            let acceptedWindow = NanightVideoGestureInput.routesToPopover(
+                eventWindowNumber: event.windowNumber, popoverWindowNumber: window.windowNumber,
+                popoverIsKey: window.isKeyWindow, pointerInside: inside,
+                ownsSequence: self.videoGestureInput.ownsSequence
+            )
+            NanightLog.gesture("RAW #\(sequence) type=\(event.type) phase=\(phase.rawValue) momentum=\(momentum.rawValue) eventWindow=\(event.windowNumber) popoverWindow=\(window.windowNumber) key=\(window.isKeyWindow) appActive=\(NSApp.isActive) pointerInside=\(inside) videoAllowed=\(self.videoGesturesAreActive) route=\(acceptedWindow)")
+
+            guard self.videoGesturesAreActive, acceptedWindow else {
+                if !self.videoGesturesAreActive { self.videoGestureInput.reset() }
+                NanightLog.gesture("DROP #\(sequence) reason=\(acceptedWindow ? "video inactive" : "window mismatch")")
                 return event
             }
 
-            switch self.model.connectionState {
-            case .signedIn, .offline:
-                break
-            case .signedOut, .authExpired, .mfaRequired, .restoring:
-                return event
+            let location = event.windowNumber == window.windowNumber
+                ? view.convert(event.locationInWindow, from: nil) : pointer
+            var input = NanightVideoGestureEvent(type: event.type, phase: phase, momentumPhase: momentum)
+            input.anchor = CGPoint(x: location.x - view.bounds.midX,
+                                   y: (location.y - view.bounds.midY) * (view.isFlipped ? 1 : -1))
+            // These NSEvent accessors are valid only for their corresponding types.
+            switch event.type {
+            case .magnify: input.magnification = event.magnification
+            case .rotate: input.counterclockwiseDegrees = CGFloat(event.rotation)
+            case .scrollWheel:
+                input.scroll = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+                input.precise = event.hasPreciseScrollingDeltas
+            default: break
             }
 
-            guard event.hasPreciseScrollingDeltas else {
-                return event
-            }
-
-            self.videoInteraction.pan(by: CGSize(
-                width: event.scrollingDeltaX,
-                height: event.scrollingDeltaY
-            ))
-            return nil
+            let before = self.videoInteraction.diagnosticDescription
+            let result = self.videoGestureInput.handle(input)
+            if result.consumed { self.gestureEventsHandled += 1 }
+            NanightLog.gesture("APPLY #\(sequence) action=\(result.reason) magnify=\(input.magnification) rotateCCW=\(input.counterclockwiseDegrees) scroll=\(input.scroll) precise=\(input.precise) anchor=\(input.anchor) consumed=\(result.consumed) settle=\(result.settle) before={\(before)} after={\(self.videoInteraction.diagnosticDescription)}")
+            if result.settle { self.settleVideoRotation(animated: true) }
+            return result.consumed ? nil : event
         }
+        NanightLog.gesture("INSTALL revision=raw-events-v2 localMonitor=\(localVideoGestureEventMonitor != nil) types=magnify,rotate,scrollWheel,beginGesture,endGesture,gesture,swipe")
+    }
 
-        NanightLog.info("Installed video pan event monitor")
+    @MainActor
+    private func logVideoGestureContext(_ label: String) {
+        let window = popover?.contentViewController?.view.window
+        let responder = window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        let pointer = window.map { $0.convertPoint(fromScreen: NSEvent.mouseLocation) } ?? .zero
+        NanightLog.gesture("\(label) shown=\(popover?.isShown == true) appActive=\(NSApp.isActive) window=\(window?.windowNumber ?? -1) key=\(window?.isKeyWindow == true) canKey=\(window?.canBecomeKey == true) firstResponder=\(responder) windowFrame=\(window?.frame ?? .zero) viewBounds=\(popover?.contentViewController?.view.bounds ?? .zero) pointerInWindow=\(pointer) received=\(gestureEventsReceived) handled=\(gestureEventsHandled) \(videoInteraction.diagnosticDescription)")
+    }
+
+    @MainActor
+    private func startVideoGestureHeartbeat() {
+        #if DEBUG
+        videoGestureHeartbeat?.cancel()
+        videoGestureHeartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard let self, self.popover?.isShown == true else { return }
+                self.logVideoGestureContext("HEARTBEAT")
+            }
+        }
+        #endif
     }
 
     @MainActor
@@ -255,6 +261,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         if let popover {
             if popover.contentSize != nextSize {
+                NanightLog.gesture("RESIZE from=\(popover.contentSize) to=\(nextSize) animated=\(animated)")
                 NanightLog.info("Popover resize from=\(popover.contentSize.debugDescription) to=\(nextSize.debugDescription) animated=\(animated) shown=\(popover.isShown)")
                 if animated,
                    popover.isShown,
@@ -265,7 +272,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                     popoverWindow.setFrame(startFrame, display: true)
 
                     NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.32
+                        context.duration = NanightVideoInteraction.settlingDuration
                         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                         popoverWindow.animator().setFrame(endFrame, display: true)
                     }
