@@ -11,12 +11,14 @@ enum NanightMenuBarIconState: Equatable {
     case motionAndSound
 }
 
-final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     @MainActor let model = NanightAppModel()
     @MainActor private let videoInteraction = NanightVideoInteraction()
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var floatingWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var cancellable: AnyCancellable?
     private lazy var videoGestureInput = NanightVideoGestureInput(interaction: videoInteraction)
     private var localVideoGestureEventMonitor: Any?
@@ -76,6 +78,12 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     private func togglePopover(from sender: NSStatusBarButton) {
+        if let floatingWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            floatingWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
         if let popover, popover.isShown {
             NanightLog.info("Popover toggle closing current popover contentSize=\(popover.contentSize.debugDescription)")
             popover.performClose(sender)
@@ -89,20 +97,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         if popover == nil {
             let popover = NSPopover()
             popover.behavior = .transient
-            popover.contentViewController = NSHostingController(rootView: NanightMenuView(
-                model: model,
-                videoInteraction: videoInteraction,
-                takeScreenshot: { [weak self] in
-                    guard let self, let popover = self.popover, popover.isShown,
-                          let window = popover.contentViewController?.view.window else {
-                        throw NanightScreenshotError.windowUnavailable
-                    }
-                    return try await NanightScreenshot.save(
-                        model: self.model, interaction: self.videoInteraction,
-                        pixelScale: window.backingScaleFactor
-                    )
-                }
-            ))
+            popover.contentViewController = NSHostingController(rootView: cameraView(isFloating: false))
             self.popover = popover
         }
 
@@ -121,6 +116,77 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.contentViewController?.view.window?.makeKey()
         logVideoGestureContext("SHOW returned")
         NanightLog.info("Popover #\(popoverDebugSequence) show returned isShown=\(popover.isShown) \(popover.debugWindowDescription)")
+    }
+
+    @MainActor
+    private func cameraView(isFloating: Bool) -> NanightMenuView {
+        NanightMenuView(
+            model: model,
+            videoInteraction: videoInteraction,
+            takeScreenshot: { [weak self] in
+                guard let self, let window = self.activeVideoView?.window else {
+                    throw NanightScreenshotError.windowUnavailable
+                }
+                return try await NanightScreenshot.save(
+                    model: self.model, interaction: self.videoInteraction,
+                    pixelScale: window.backingScaleFactor
+                )
+            },
+            isFloating: isFloating,
+            toggleFloating: { [weak self] in self?.toggleFloatingWindow() }
+        )
+    }
+
+    @MainActor
+    private var activeVideoView: NSView? {
+        if let floatingWindow { return floatingWindow.contentViewController?.view }
+        return popover?.isShown == true ? popover?.contentViewController?.view : nil
+    }
+
+    @MainActor
+    private func toggleFloatingWindow() {
+        if let floatingWindow {
+            floatingWindow.close()
+            return
+        }
+
+        let origin = popover?.contentViewController?.view.window?.frame.origin
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: preferredContentSize),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
+        window.title = model.activeCamera?.name ?? "Nanight"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(button)?.isHidden = true
+        }
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isReleasedWhenClosed = false
+        window.contentMinSize = NSSize(width: 360, height: 240)
+        window.contentViewController = NSHostingController(rootView: cameraView(isFloating: true).ignoresSafeArea())
+        window.setContentSize(preferredContentSize)
+        window.delegate = self
+        floatingWindow = window
+        popover?.performClose(nil)
+        // The RTMP player connects to one surface. Recreate the popover on its
+        // next open so it reconnects after the floating surface is removed.
+        popover = nil
+        if let origin { window.setFrameOrigin(origin) } else { window.center() }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        model.setVideoVisible(true)
+    }
+
+    @MainActor
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === floatingWindow else { return }
+        floatingWindow = nil
+        videoGestureInput.reset()
+        model.setVideoVisible(false)
     }
 
     @MainActor
@@ -151,7 +217,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         videoGestureInput.reset()
         settleVideoRotation(animated: false)
         logVideoGestureContext("CLOSE")
-        model.setVideoVisible(false)
+        model.setVideoVisible(floatingWindow != nil)
         removeOutsideClickEventMonitors()
         NanightLog.info("Popover #\(popoverDebugSequence) didClose cleanup completed retainedPopover=\(popover != nil)")
     }
@@ -169,7 +235,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     private var videoGesturesAreActive: Bool {
-        guard popover?.isShown == true else { return false }
+        guard activeVideoView != nil else { return false }
         switch model.connectionState {
         case .signedIn, .offline: return true
         case .signedOut, .authExpired, .mfaRequired, .restoring: return false
@@ -193,8 +259,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         guard localVideoGestureEventMonitor == nil else { return }
         let types: NSEvent.EventTypeMask = [.magnify, .rotate, .scrollWheel, .beginGesture, .endGesture, .gesture, .swipe]
         localVideoGestureEventMonitor = NSEvent.addLocalMonitorForEvents(matching: types) { [weak self] event in
-            guard let self, let popover = self.popover, popover.isShown,
-                  let view = popover.contentViewController?.view, let window = view.window else { return event }
+            guard let self, let view = self.activeVideoView, let window = view.window else { return event }
 
             self.gestureEventsReceived += 1
             let sequence = self.gestureEventsReceived
@@ -222,12 +287,16 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             var input = NanightVideoGestureEvent(type: event.type, phase: phase, momentumPhase: momentum)
             input.anchor = CGPoint(x: location.x - view.bounds.midX,
                                    y: (location.y - view.bounds.midY) * (view.isFlipped ? 1 : -1))
+            let viewport = self.videoInteraction.viewportSize
+            let fitScale = max(0.001, min(view.bounds.width / viewport.width, view.bounds.height / viewport.height))
+            input.anchor.x /= fitScale
+            input.anchor.y /= fitScale
             // These NSEvent accessors are valid only for their corresponding types.
             switch event.type {
             case .magnify: input.magnification = event.magnification
             case .rotate: input.counterclockwiseDegrees = CGFloat(event.rotation)
             case .scrollWheel:
-                input.scroll = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+                input.scroll = CGSize(width: event.scrollingDeltaX / fitScale, height: event.scrollingDeltaY / fitScale)
                 input.precise = event.hasPreciseScrollingDeltas
             default: break
             }
@@ -372,9 +441,6 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: model.activeCamera?.name ?? "Nanight", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refreshAccount), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem(title: model.isAudioMuted ? "Unmute" : "Mute", action: #selector(toggleAudio), keyEquivalent: "m"))
-        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -382,6 +448,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         for item in menu.items {
             item.target = self
+            item.image = nil
         }
 
         statusItem?.menu = menu
@@ -391,24 +458,18 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @objc
     @MainActor
-    private func refreshAccount() {
-        Task {
-            await model.refreshCameras()
-            await model.refreshEvents()
+    func openSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
+            window.title = "Settings"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
         }
-    }
-
-    @objc
-    @MainActor
-    private func toggleAudio() {
-        model.toggleAudio()
-    }
-
-    @objc
-    @MainActor
-    private func openSettings() {
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        popover?.performClose(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc

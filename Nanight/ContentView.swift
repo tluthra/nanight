@@ -7,6 +7,8 @@ struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
     let videoInteraction: NanightVideoInteraction
     let takeScreenshot: @MainActor () async throws -> URL
+    var isFloating = false
+    var toggleFloating: () -> Void = {}
 
     var body: some View {
         Group {
@@ -24,7 +26,7 @@ struct NanightMenuView: View {
                     .frame(width: 360)
                     .padding(16)
             case .signedIn, .offline:
-                MonitorView(model: model, videoInteraction: videoInteraction, takeScreenshot: takeScreenshot)
+                MonitorView(model: model, videoInteraction: videoInteraction, takeScreenshot: takeScreenshot, isFloating: isFloating, toggleFloating: toggleFloating)
             }
         }
     }
@@ -127,6 +129,8 @@ private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
     @ObservedObject var videoInteraction: NanightVideoInteraction
     let takeScreenshot: @MainActor () async throws -> URL
+    var isFloating = false
+    var toggleFloating: () -> Void = {}
     @State private var isTakingScreenshot = false
     @State private var screenshotSaved = false
     @State private var screenshotFlash = false
@@ -135,101 +139,112 @@ private struct MonitorView: View {
     var body: some View {
         let viewportSize = videoInteraction.viewportSize
 
-        ZStack(alignment: .topLeading) {
-            ZStack {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let fitScale = min(size.width / viewportSize.width, size.height / viewportSize.height)
+            ZStack(alignment: .topLeading) {
                 ZStack {
-                    if let player = model.player {
-                        PlayerSurface(player: player)
-                    } else if let rtmpPlayer = model.rtmpPlayer {
-                        RTMPPlayerSurface(player: rtmpPlayer)
-                    } else {
-                        PlaceholderVideoView(message: model.streamStatusText)
-                    }
-                }
-                .frame(width: NanightVideoInteraction.surfaceSize.width, height: NanightVideoInteraction.surfaceSize.height)
-                .scaleEffect(videoInteraction.displayScale)
-                .rotationEffect(.degrees(videoInteraction.rotationDegrees))
-                .offset(videoInteraction.offset)
-                .allowsHitTesting(false)
-            }
-            .frame(width: viewportSize.width, height: viewportSize.height)
-            .background(Color.black)
-            .clipped()
-
-            VStack {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.activeCamera?.name ?? "No camera")
-                            .font(.headline.weight(.semibold))
-                        if let rtmpPlayer = model.rtmpPlayer {
-                            RTMPLiveStatusRow(player: rtmpPlayer, climate: model.climate)
+                    ZStack {
+                        if let player = model.player {
+                            PlayerSurface(player: player)
+                        } else if let rtmpPlayer = model.rtmpPlayer {
+                            RTMPPlayerSurface(player: rtmpPlayer)
                         } else {
-                            LiveStatusRow(status: .live, climate: model.climate)
+                            PlaceholderVideoView(message: model.streamStatusText)
                         }
-                        HStack(spacing: 10) {
-                            ActivityIndicator(title: "Motion", systemName: "figure.walk", active: model.activity.motionActive, activeColor: .yellow)
-                            ActivityIndicator(title: "Sound", systemName: "waveform", active: model.activity.soundActive, activeColor: .orange)
-                        }
-                        .padding(.top, 3)
                     }
-                    .foregroundStyle(.white)
-                    .shadow(radius: 3)
+                    .frame(width: NanightVideoInteraction.surfaceSize.width, height: NanightVideoInteraction.surfaceSize.height)
+                    .scaleEffect(videoInteraction.displayScale * fitScale)
+                    .rotationEffect(.degrees(videoInteraction.rotationDegrees))
+                    .offset(x: videoInteraction.offset.width * fitScale, y: videoInteraction.offset.height * fitScale)
+                    .allowsHitTesting(false)
+                }
+                .frame(width: size.width, height: size.height)
+                .background(Color.black)
+                .clipped()
 
-                    Spacer()
-
-                    if model.cameras.count > 1 {
-                        Picker("Camera", selection: Binding(
-                            get: { model.activeCamera?.uid ?? "" },
-                            set: { model.selectCamera($0) }
-                        )) {
-                            ForEach(model.cameras) { camera in
-                                Text(camera.name).tag(camera.uid)
+                VStack {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.activeCamera?.name ?? "No camera")
+                                .font(.headline.weight(.semibold))
+                            if let rtmpPlayer = model.rtmpPlayer {
+                                RTMPLiveStatusRow(player: rtmpPlayer, climate: model.climate)
+                            } else {
+                                LiveStatusRow(status: .live, climate: model.climate)
                             }
+                            HStack(spacing: 10) {
+                                ActivityIndicator(title: "Motion", systemName: "figure.walk", active: model.activity.motionActive, activeColor: .yellow)
+                                ActivityIndicator(title: "Sound", systemName: "waveform", active: model.activity.soundActive, activeColor: .orange)
+                            }
+                            .padding(.top, 3)
                         }
-                        .labelsHidden()
-                        .frame(width: 130)
-                    }
-                }
+                        .foregroundStyle(.white)
+                        .shadow(radius: 3)
 
-                Spacer()
+                        Spacer()
 
-                HStack(spacing: 10) {
-                    VStack(spacing: 10) {
-                        OverlayButton(
-                            systemName: screenshotSaved ? "checkmark" : "camera.fill",
-                            help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
-                            action: saveScreenshot
-                        )
-                        .disabled(isTakingScreenshot)
-
-                        OverlayButton(
-                            systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                            help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
-                            foregroundColor: model.isAudioMuted ? .red : .white,
-                            action: model.toggleAudio
-                        )
+                        if model.cameras.count > 1 {
+                            Picker("Camera", selection: Binding(
+                                get: { model.activeCamera?.uid ?? "" },
+                                set: { model.selectCamera($0) }
+                            )) {
+                                ForEach(model.cameras) { camera in
+                                    Text(camera.name).tag(camera.uid)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 130)
+                        }
                     }
 
                     Spacer()
 
+                    HStack(alignment: .bottom, spacing: 10) {
+                        VStack(spacing: 10) {
+                            OverlayButton(
+                                systemName: screenshotSaved ? "checkmark" : "camera.fill",
+                                help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
+                                action: saveScreenshot
+                            )
+                            .disabled(isTakingScreenshot)
+
+                            OverlayButton(
+                                systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
+                                foregroundColor: model.isAudioMuted ? .red : .white,
+                                action: model.toggleAudio
+                            )
+                        }
+
+                        Spacer()
+
+                        OverlayButton(
+                            systemName: isFloating ? "pip.exit" : "pip.enter",
+                            help: isFloating ? "Unfloat camera" : "Float camera",
+                            action: toggleFloating
+                        )
+                        .accessibilityLabel(isFloating ? "Unfloat camera" : "Float camera")
+                    }
+                }
+                .padding(14)
+
+                if let errorMessage = model.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.58))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             }
-            .padding(14)
-
-            if let errorMessage = model.errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.58))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .padding(14)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            }
+            .frame(width: size.width, height: size.height)
+            .clipped()
         }
-        .frame(width: viewportSize.width, height: viewportSize.height)
-        .clipped()
+        .frame(width: isFloating ? nil : viewportSize.width, height: isFloating ? nil : viewportSize.height)
         // Fill the hosting view throughout AppKit's resize, including the safe
         // area at the popover edge. The popover supplies the outer corner shape.
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -8,5 +8,13 @@ struct NanightApp: App {
         Settings {
             SettingsView(model: appDelegate.model)
         }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings") {
+                    appDelegate.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }
