@@ -149,6 +149,7 @@ final class NanightRTMPPlayer: ObservableObject {
     @Published private(set) var videoFrameState: NanightVideoFrameState = .waitingForFrames
 
     private var view: PiPHKView?
+    private(set) var screenshotPixelBuffer: CVPixelBuffer?
     private var connection: RTMPConnection?
     private var stream: RTMPStream?
     private var audioRenderer: NanightAudioRenderer?
@@ -327,6 +328,7 @@ final class NanightRTMPPlayer: ObservableObject {
         receivedFrameCount = 0
         presentedFrameCount = 0
         lastFrameDiagnosticAt = 0
+        screenshotPixelBuffer = nil
         (view?.layer as? AVSampleBufferDisplayLayer)?.flushAndRemoveImage()
         videoFrameState = .waitingForFrames
 
@@ -482,6 +484,7 @@ final class NanightRTMPPlayer: ObservableObject {
             if layer.isReadyForMoreMediaData {
                 NanightVideoPresentation.displayImmediately(sample)
                 layer.enqueue(sample)
+                screenshotPixelBuffer = CMSampleBufferGetImageBuffer(sample)
                 presentedFrameCount += 1
             }
         }
@@ -537,6 +540,7 @@ final class NanightRTMPPlayer: ObservableObject {
             lastErrorMessage = nil
             NanightLog.info("HaishinKit video frames are live")
         case .stalled:
+            screenshotPixelBuffer = nil
             (view?.layer as? AVSampleBufferDisplayLayer)?.flushAndRemoveImage()
             NanightLog.warning("Video stalled: received=\(receivedFrameCount) presented=\(presentedFrameCount) displayFailed=\(displayFailed) transportFailed=\(transportFailed)")
             if transportFailed || inputState == .stalled {
@@ -672,6 +676,7 @@ final class NanightRTMPPlayer: ObservableObject {
         audioRenderer?.stop()
         videoFrameState = .stalled
         readyStateText = "Reconnecting stream"
+        screenshotPixelBuffer = nil
         (view?.layer as? AVSampleBufferDisplayLayer)?.flushAndRemoveImage()
         NanightLog.warning("Stream recovery: \(reason)")
         scheduleAutomaticReconnect()
@@ -731,6 +736,7 @@ struct NanightRTMPTarget {
 extension NanightRTMPPlayer: PiPHKViewRepresentable.PreviewSource {
     nonisolated func connect(to view: PiPHKView) {
         Task { @MainActor in
+            self.screenshotPixelBuffer = nil
             self.view = view
             (view.layer as? AVSampleBufferDisplayLayer)?.flushAndRemoveImage()
         }

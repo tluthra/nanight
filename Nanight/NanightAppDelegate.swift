@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import QuartzCore
 import SwiftUI
 
 enum NanightMenuBarIconState: Equatable {
@@ -92,7 +91,17 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             popover.behavior = .transient
             popover.contentViewController = NSHostingController(rootView: NanightMenuView(
                 model: model,
-                videoInteraction: videoInteraction
+                videoInteraction: videoInteraction,
+                takeScreenshot: { [weak self] in
+                    guard let self, let popover = self.popover, popover.isShown,
+                          let window = popover.contentViewController?.view.window else {
+                        throw NanightScreenshotError.windowUnavailable
+                    }
+                    return try await NanightScreenshot.save(
+                        model: self.model, interaction: self.videoInteraction,
+                        pixelScale: window.backingScaleFactor
+                    )
+                }
             ))
             self.popover = popover
         }
@@ -263,22 +272,13 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             if popover.contentSize != nextSize {
                 NanightLog.gesture("RESIZE from=\(popover.contentSize) to=\(nextSize) animated=\(animated)")
                 NanightLog.info("Popover resize from=\(popover.contentSize.debugDescription) to=\(nextSize.debugDescription) animated=\(animated) shown=\(popover.isShown)")
-                if animated,
-                   popover.isShown,
-                   let popoverWindow = popover.contentViewController?.view.window {
-                    let startFrame = popoverWindow.frame
-                    popover.contentSize = nextSize
-                    let endFrame = popoverWindow.frame
-                    popoverWindow.setFrame(startFrame, display: true)
-
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = NanightVideoInteraction.settlingDuration
-                        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                        popoverWindow.animator().setFrame(endFrame, display: true)
-                    }
-                } else {
-                    popover.contentSize = nextSize
-                }
+                // NSPopover already animates contentSize changes. Moving its window
+                // separately interrupts that transition and can expose its backing material.
+                let previousAnimates = popover.animates
+                popover.animates = animated
+                popover.contentSize = nextSize
+                popover.animates = previousAnimates
+                NanightLog.gesture("RESIZE native contentSize=\(popover.contentSize) windowFrame=\(popover.contentViewController?.view.window?.frame ?? .zero)")
             } else {
                 NanightLog.info("Popover resize skipped size already \(nextSize.debugDescription) shown=\(popover.isShown)")
             }

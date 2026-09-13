@@ -44,6 +44,8 @@ final class NanightAppModel: ObservableObject {
     private var pendingMFAEmail: String?
     private var pendingMFAPassword: String?
     private var monitorTask: Task<Void, Never>?
+    private var motionClearTask: Task<Void, Never>?
+    private var lastObservedMotionAt: Date?
     private var launchNotificationBaseline = Date()
     private var lastNotifiedMotionAt: Date?
     private var lastNotifiedSoundAt: Date?
@@ -303,6 +305,7 @@ final class NanightAppModel: ObservableObject {
     func selectCamera(_ babyUID: String) {
         NanightLog.info("Selecting camera \(babyUID)")
         settings.selectedBabyUID = babyUID
+        resetMotionTimer()
         activity = NurseryActivity()
         climate = nil
         prepareStream()
@@ -404,11 +407,29 @@ final class NanightAppModel: ObservableObject {
             let events = try await api.messages(accessToken: accessToken, babyUID: camera.uid, limit: 20)
             await refreshClimate(accessToken: accessToken, camera: camera)
             guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
-            let newActivity = NurseryActivity.current(
+            var newActivity = NurseryActivity.current(
                 from: events,
                 activeWindow: settings.eventActiveWindowSeconds
             )
             handleActivityNotifications(newActivity, camera: camera)
+            // Repeated polls of the same event must not restart the motion indicator.
+            if let motionAt = newActivity.lastMotionAt,
+               lastObservedMotionAt.map({ motionAt > $0 }) ?? true {
+                lastObservedMotionAt = motionAt
+                motionClearTask?.cancel()
+                newActivity.motionActive = true
+                motionClearTask = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: .seconds(10))
+                    } catch {
+                        return
+                    }
+                    self?.activity.motionActive = false
+                    self?.motionClearTask = nil
+                }
+            } else {
+                newActivity.motionActive = activity.motionActive
+            }
             activity = newActivity
             lastEventRefreshAt = Date()
             cameraStatusText = "Live"
@@ -438,6 +459,7 @@ final class NanightAppModel: ObservableObject {
         streamStatusText = "Signed out"
         tokens = nil
         cameras = []
+        resetMotionTimer()
         activity = NurseryActivity()
         climate = nil
         pendingMFAToken = nil
@@ -631,6 +653,12 @@ final class NanightAppModel: ObservableObject {
         } catch {
             NanightLog.warning("Climate refresh failed: \(userFacing(error))")
         }
+    }
+
+    private func resetMotionTimer() {
+        motionClearTask?.cancel()
+        motionClearTask = nil
+        lastObservedMotionAt = nil
     }
 
     private func handleActivityNotifications(_ newActivity: NurseryActivity, camera: NanitBaby) {

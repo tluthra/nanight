@@ -6,6 +6,7 @@ import SwiftUI
 struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
     let videoInteraction: NanightVideoInteraction
+    let takeScreenshot: @MainActor () async throws -> URL
 
     var body: some View {
         Group {
@@ -23,7 +24,7 @@ struct NanightMenuView: View {
                     .frame(width: 360)
                     .padding(16)
             case .signedIn, .offline:
-                MonitorView(model: model, videoInteraction: videoInteraction)
+                MonitorView(model: model, videoInteraction: videoInteraction, takeScreenshot: takeScreenshot)
             }
         }
     }
@@ -125,6 +126,11 @@ private struct BusyGlyph: View {
 private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
     @ObservedObject var videoInteraction: NanightVideoInteraction
+    let takeScreenshot: @MainActor () async throws -> URL
+    @State private var isTakingScreenshot = false
+    @State private var screenshotSaved = false
+    @State private var screenshotFlash = false
+    @State private var screenshotError: String?
 
     var body: some View {
         let viewportSize = videoInteraction.viewportSize
@@ -160,6 +166,11 @@ private struct MonitorView: View {
                         } else {
                             LiveStatusRow(status: .live, climate: model.climate)
                         }
+                        HStack(spacing: 10) {
+                            ActivityIndicator(title: "Motion", systemName: "figure.walk", active: model.activity.motionActive, activeColor: .yellow)
+                            ActivityIndicator(title: "Sound", systemName: "waveform", active: model.activity.soundActive, activeColor: .orange)
+                        }
+                        .padding(.top, 3)
                     }
                     .foregroundStyle(.white)
                     .shadow(radius: 3)
@@ -183,18 +194,24 @@ private struct MonitorView: View {
                 Spacer()
 
                 HStack(spacing: 10) {
-                    OverlayButton(
-                        systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                        help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
-                        foregroundColor: model.isAudioMuted ? .red : .white,
-                        action: model.toggleAudio
-                    )
+                    VStack(spacing: 10) {
+                        OverlayButton(
+                            systemName: screenshotSaved ? "checkmark" : "camera.fill",
+                            help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
+                            action: saveScreenshot
+                        )
+                        .disabled(isTakingScreenshot)
+
+                        OverlayButton(
+                            systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                            help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
+                            foregroundColor: model.isAudioMuted ? .red : .white,
+                            action: model.toggleAudio
+                        )
+                    }
 
                     Spacer()
 
-                    ActivityDot(systemName: "figure.walk.motion", active: model.activity.motionActive, activeColor: .yellow)
-                    ActivityDot(systemName: "waveform", active: model.activity.soundActive, activeColor: .orange)
-                    ActivityDot(systemName: "network", active: model.isAuthenticated, activeColor: .green)
                 }
             }
             .padding(14)
@@ -212,12 +229,49 @@ private struct MonitorView: View {
             }
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipped()
+        // Fill the hosting view throughout AppKit's resize, including the safe
+        // area at the popover edge. The popover supplies the outer corner shape.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+        .overlay {
+            Color.white.opacity(screenshotFlash ? 0.7 : 0)
+                .allowsHitTesting(false)
+        }
+        .alert("Couldn’t save screenshot", isPresented: Binding(
+            get: { screenshotError != nil },
+            set: { if !$0 { screenshotError = nil } }
+        )) {
+            Button("OK", role: .cancel) { screenshotError = nil }
+        } message: {
+            Text(screenshotError ?? "")
+        }
         .onAppear {
             NanightLog.gesture("VIEW appeared \(videoInteraction.diagnosticDescription)")
         }
         .onChange(of: videoInteraction.diagnosticDescription) { description in
             NanightLog.gesture("VIEW observed \(description)")
+        }
+    }
+
+    private func saveScreenshot() {
+        guard !isTakingScreenshot else { return }
+        isTakingScreenshot = true
+        Task { @MainActor in
+            defer { isTakingScreenshot = false }
+            do {
+                _ = try await takeScreenshot()
+                screenshotSaved = true
+                if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    screenshotFlash = true
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    withAnimation(.easeOut(duration: 0.25)) { screenshotFlash = false }
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                screenshotSaved = false
+            } catch {
+                screenshotError = error.localizedDescription
+            }
         }
     }
 }
@@ -363,19 +417,18 @@ private struct PlaceholderVideoView: View {
     }
 }
 
-private struct ActivityDot: View {
+private struct ActivityIndicator: View {
+    let title: String
     let systemName: String
     let active: Bool
     let activeColor: Color
 
     var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(active ? .black : .white.opacity(0.7))
-            .frame(width: 28, height: 28)
-            .background(active ? activeColor : Color.black.opacity(0.38))
-            .clipShape(Circle())
-            .help(active ? "Active" : "Inactive")
+        Label(title, systemImage: systemName)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(active ? activeColor : .white.opacity(0.45))
+            .help(active ? "\(title) detected" : "No \(title.lowercased()) detected")
+            .accessibilityLabel("\(title): \(active ? "detected" : "not detected")")
     }
 }
 
@@ -467,12 +520,27 @@ struct SettingsView: View {
                 Toggle("Sound menu bar state", isOn: $model.settings.soundMenuBarStateEnabled)
 
                 HStack {
-                    Text("Activity window")
+                    Text("Motion indicator duration")
+                    Spacer()
+                    Text("10 seconds")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Motion clears automatically 10 seconds after a new motion event is detected. Each new event restarts the timer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Text("Recent activity window")
                     Slider(value: $model.settings.eventActiveWindowSeconds, in: 30...600, step: 30)
                     Text("\(Int(model.settings.eventActiveWindowSeconds))s")
                         .foregroundStyle(.secondary)
                         .frame(width: 48, alignment: .trailing)
                 }
+                Text("Only events within this window count as recent activity. Sound stays active for this long after its latest event; motion uses the separate 10-second timer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Notifications") {
@@ -491,12 +559,16 @@ struct SettingsView: View {
                 Toggle("Offline", isOn: $model.settings.notifyOnOffline)
 
                 HStack {
-                    Text("Cooldown")
+                    Text("Notification cooldown")
                     Slider(value: $model.settings.notificationCooldownSeconds, in: 30...600, step: 30)
                     Text("\(Int(model.settings.notificationCooldownSeconds))s")
                         .foregroundStyle(.secondary)
                         .frame(width: 48, alignment: .trailing)
                 }
+                Text("Minimum time between notifications of the same type. This does not change how long activity indicators stay active.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Comfort Range") {
