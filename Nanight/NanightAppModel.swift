@@ -36,6 +36,10 @@ final class NanightAppModel: ObservableObject {
     private let keychain: KeychainTokenStore
     private let notifications: NanitNotificationController
     private var tokens: NanitTokens?
+    private var tokenRefreshTask: Task<NanitTokens, Error>?
+    private var tokenRefreshID = UUID()
+    private var authGeneration = 0
+    private var lastForcedStreamRefresh: Date?
     private var pendingMFAToken: String?
     private var pendingMFAEmail: String?
     private var pendingMFAPassword: String?
@@ -66,6 +70,15 @@ final class NanightAppModel: ObservableObject {
         self.audioMuted = UserDefaults.standard.object(forKey: Self.audioMutedStorageKey) as? Bool ?? true
 
         NanightLog.info("App launched")
+
+        #if DEBUG
+        // Unit tests must not open the user's Keychain or connect to their camera.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil {
+            connectionState = .signedOut
+            return
+        }
+        #endif
 
         Task {
             await restoreSession()
@@ -142,12 +155,12 @@ final class NanightAppModel: ObservableObject {
     }
 
     private var shouldPlayStream: Bool {
-        !videoPaused && isVideoVisible
+        !videoPaused
     }
 
     func restoreSession() async {
         NanightLog.info("Restoring saved Nanit session")
-
+        let generation = authGeneration
         do {
             guard let storedTokens = try keychain.load() else {
                 NanightLog.info("No saved Nanit session found")
@@ -157,6 +170,7 @@ final class NanightAppModel: ObservableObject {
 
             tokens = storedTokens
             _ = try await validAccessToken(forceRefresh: true)
+            guard generation == authGeneration, !Task.isCancelled else { return }
             connectionState = .signedIn
             NanightLog.info("Saved Nanit session restored")
             await refreshCameras()
@@ -164,6 +178,7 @@ final class NanightAppModel: ObservableObject {
                 startMonitoring()
             }
         } catch {
+            guard generation == authGeneration, !Task.isCancelled else { return }
             NanightLog.error("Session restore failed: \(userFacing(error))")
             connectionState = .authExpired("Sign in again.")
             errorMessage = userFacing(error)
@@ -244,10 +259,12 @@ final class NanightAppModel: ObservableObject {
         }
 
         NanightLog.info("Refreshing Nanit cameras")
-
+        let generation = authGeneration
         do {
             let accessToken = try await validAccessToken()
-            cameras = try await api.babies(accessToken: accessToken)
+            let updatedCameras = try await api.babies(accessToken: accessToken)
+            guard generation == authGeneration, !Task.isCancelled else { return }
+            cameras = updatedCameras
             lastCameraRefreshAt = Date()
 
             if settings.selectedBabyUID == nil || !cameras.contains(where: { $0.uid == settings.selectedBabyUID }) {
@@ -258,6 +275,7 @@ final class NanightAppModel: ObservableObject {
                 cameraStatusText = "No cameras"
                 errorMessage = NanitAPIError.noCamera.localizedDescription
                 NanightLog.warning("Camera refresh returned no cameras")
+                prepareStream()
             } else {
                 cameraStatusText = "Connected"
                 NanightLog.info("Camera refresh found \(cameras.count) camera(s)")
@@ -276,6 +294,7 @@ final class NanightAppModel: ObservableObject {
             wasOffline = false
             connectionState = .signedIn
         } catch {
+            guard generation == authGeneration, !Task.isCancelled else { return }
             NanightLog.error("Camera refresh failed: \(userFacing(error))")
             markOffline(error)
         }
@@ -292,10 +311,11 @@ final class NanightAppModel: ObservableObject {
 
     func reconnectStream() {
         NanightLog.info("Reconnecting stream")
-        prepareStream()
-        if shouldPlayStream {
-            player?.play()
-            rtmpPlayer?.play()
+        if let rtmpPlayer {
+            rtmpPlayer.reconnect()
+        } else {
+            prepareStream()
+            if shouldPlayStream { player?.play() }
         }
     }
 
@@ -305,7 +325,7 @@ final class NanightAppModel: ObservableObject {
         if videoPaused {
             player?.pause()
             rtmpPlayer?.pause()
-        } else if isVideoVisible {
+        } else {
             player?.play()
             rtmpPlayer?.play()
         }
@@ -324,18 +344,10 @@ final class NanightAppModel: ObservableObject {
         }
 
         isVideoVisible = visible
-        NanightLog.info(visible ? "Video popover opened" : "Video popover closed; stopping stream playback")
-        if visible {
-            applyAudioPlaybackState()
-            if shouldPlayStream {
-                player?.play()
-                rtmpPlayer?.play()
-            }
-        } else {
-            player?.pause()
-            rtmpPlayer?.pause()
-            applyAudioPlaybackState()
-        }
+        // Visibility controls sound, not the connection. Keep receiving current
+        // frames so reopening the retained popover does not need another handshake.
+        NanightLog.info(visible ? "Video popover opened; reusing stream" : "Video popover closed; muting audio")
+        applyAudioPlaybackState()
     }
 
     private func applyAudioPlaybackState() {
@@ -386,10 +398,12 @@ final class NanightAppModel: ObservableObject {
             return
         }
 
+        let generation = authGeneration
         do {
             let accessToken = try await validAccessToken()
             let events = try await api.messages(accessToken: accessToken, babyUID: camera.uid, limit: 20)
             await refreshClimate(accessToken: accessToken, camera: camera)
+            guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
             let newActivity = NurseryActivity.current(
                 from: events,
                 activeWindow: settings.eventActiveWindowSeconds
@@ -402,6 +416,7 @@ final class NanightAppModel: ObservableObject {
             wasOffline = false
             NanightLog.info("Event refresh succeeded for \(camera.name): motion=\(newActivity.motionActive), sound=\(newActivity.soundActive)")
         } catch {
+            guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
             NanightLog.error("Event refresh failed: \(userFacing(error))")
             markOffline(error)
         }
@@ -409,6 +424,10 @@ final class NanightAppModel: ObservableObject {
 
     func signOut() {
         NanightLog.info("Signing out")
+        authGeneration += 1
+        tokenRefreshTask?.cancel()
+        tokenRefreshTask = nil
+        lastForcedStreamRefresh = nil
         monitorTask?.cancel()
         monitorTask = nil
         player?.pause()
@@ -448,7 +467,8 @@ final class NanightAppModel: ObservableObject {
             "Camera UID: \(camera?.cameraUID ?? "none")",
             "Speaker UID: \(camera?.speakerUID ?? "none")",
             "Stream URL present: \(streamURL == nil ? "no" : "yes")",
-            "Stream status: \(streamStatusText)",
+            "Stream status: \(rtmpPlayer?.readyStateText ?? streamStatusText)",
+            "Video frames: \(rtmpPlayer.map { String(describing: $0.videoFrameState) } ?? "unavailable")",
             "Motion active: \(activity.motionActive)",
             "Sound active: \(activity.soundActive)",
             "Temperature: \(climate?.temperatureCelsius.map { "\($0) C" } ?? "unknown")",
@@ -469,6 +489,9 @@ final class NanightAppModel: ObservableObject {
         do {
             NanightLog.info("Saving authenticated Nanit session")
             try keychain.save(newTokens)
+            authGeneration += 1
+            tokenRefreshTask?.cancel()
+            tokenRefreshTask = nil
             tokens = newTokens
             pendingMFAToken = nil
             pendingMFAEmail = nil
@@ -484,37 +507,61 @@ final class NanightAppModel: ObservableObject {
         }
     }
 
-    private func validAccessToken(forceRefresh: Bool = false) async throws -> String {
-        guard var currentTokens = tokens else {
-            NanightLog.error("Access token requested without an active session")
+    private func validAccessToken(forceRefresh: Bool = false, updatePlayback: Bool = true) async throws -> String {
+        guard let currentTokens = tokens else {
             throw NanitAPIError.authExpired("Not signed in.")
         }
-
-        let previousAccessToken = currentTokens.accessToken
-
-        if forceRefresh || currentTokens.shouldRefresh {
-            NanightLog.info("Refreshing Nanit access token")
-
-            do {
-                currentTokens = try await api.refresh(
-                    accessToken: currentTokens.accessToken,
-                    refreshToken: currentTokens.refreshToken
-                )
-            } catch {
-                NanightLog.error("Access token refresh failed: \(userFacing(error))")
-                throw error
-            }
-
-            try keychain.save(currentTokens)
-            tokens = currentTokens
-            NanightLog.info("Nanit access token refreshed")
-
-            if currentTokens.accessToken != previousAccessToken {
-                prepareStream()
+        guard forceRefresh || currentTokens.shouldRefresh || tokenRefreshTask != nil else {
+            return currentTokens.accessToken
+        }
+        let generation = authGeneration
+        if tokenRefreshTask == nil {
+            tokenRefreshID = UUID()
+            tokenRefreshTask = Task { [api] in
+                try await api.refresh(accessToken: currentTokens.accessToken, refreshToken: currentTokens.refreshToken)
             }
         }
+        guard let refresh = tokenRefreshTask else { throw CancellationError() }
+        let refreshID = tokenRefreshID
+        do {
+            let refreshed = try await refresh.value
+            guard generation == authGeneration, tokens != nil else { throw CancellationError() }
+            // Concurrent callers share the request; only the first persists and updates playback.
+            if tokenRefreshTask != nil, tokenRefreshID == refreshID {
+                try keychain.save(refreshed)
+                tokens = refreshed
+                tokenRefreshTask = nil
+                NanightLog.info("Nanit access token refreshed")
+                if updatePlayback { prepareStream() }
+            }
+            return refreshed.accessToken
+        } catch {
+            if generation == authGeneration, tokenRefreshID == refreshID {
+                tokenRefreshTask = nil
+                if let apiError = error as? NanitAPIError {
+                    switch apiError {
+                    case .authExpired, .invalidCredentials:
+                        connectionState = .authExpired("Sign in again.")
+                        stopMonitoring()
+                        rtmpPlayer?.close()
+                    default: break
+                    }
+                }
+            }
+            throw error
+        }
+    }
 
-        return currentTokens.accessToken
+    private func playbackURL(for babyUID: String, forceRefresh: Bool) async throws -> URL {
+        let generation = authGeneration
+        let mayForce = forceRefresh && (lastForcedStreamRefresh.map { Date().timeIntervalSince($0) >= 60 } ?? true)
+        if mayForce { lastForcedStreamRefresh = Date() }
+        let accessToken = try await validAccessToken(forceRefresh: mayForce, updatePlayback: false)
+        guard !Task.isCancelled, generation == authGeneration, activeCamera?.uid == babyUID,
+              let url = api.rtmpsStreamURL(babyUID: babyUID, accessToken: accessToken)
+        else { throw CancellationError() }
+        streamURL = url
+        return url
     }
 
     private func prepareStream() {
@@ -524,6 +571,7 @@ final class NanightAppModel: ObservableObject {
         else {
             NanightLog.warning("Stream setup skipped because camera or session is missing")
             streamURL = nil
+            player?.pause()
             player = nil
             rtmpPlayer?.close()
             rtmpPlayer = nil
@@ -539,6 +587,10 @@ final class NanightAppModel: ObservableObject {
             player = nil
             let playback = rtmpPlayer ?? NanightRTMPPlayer()
             rtmpPlayer = playback
+            playback.resolveStreamURL = { [weak self] forceRefresh in
+                guard let self else { throw CancellationError() }
+                return try await self.playbackURL(for: camera.uid, forceRefresh: forceRefresh)
+            }
             playback.start(url: url, muted: isPlaybackAudioMuted, paused: !shouldPlayStream)
             streamStatusText = playback.readyStateText
             NanightLog.info("Prepared HaishinKit playback for \(url.scheme ?? "unknown") stream")
@@ -564,12 +616,14 @@ final class NanightAppModel: ObservableObject {
     }
 
     private func refreshClimate(accessToken: String, camera: NanitBaby) async {
+        let generation = authGeneration
         do {
             guard let reading = try await api.climate(accessToken: accessToken, cameraUID: camera.cameraUID) else {
                 NanightLog.info("Climate refresh returned no sensor values for \(camera.name)")
                 return
             }
 
+            guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
             climate = reading
             NanightLog.info(
                 "Climate refresh succeeded for \(camera.name): tempC=\(reading.temperatureCelsius?.description ?? "nil"), humidity=\(reading.humidityPercent?.description ?? "nil")"
@@ -610,6 +664,7 @@ final class NanightAppModel: ObservableObject {
     }
 
     private func markOffline(_ error: Error) {
+        if case .authExpired = connectionState { return }
         let message = userFacing(error)
         cameraStatusText = "Reconnecting"
         connectionState = .offline(message)

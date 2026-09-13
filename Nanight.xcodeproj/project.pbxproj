@@ -202,7 +202,7 @@
 			mainGroup = D28556562FF8CE0F006293D0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D28556892FF8D090006293D0 /* XCRemoteSwiftPackageReference "HaishinKit" */,
+				D28556892FF8D090006293D0 /* XCLocalSwiftPackageReference "Vendor/HaishinKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D28556602FF8CE0F006293D0 /* Products */;
@@ -406,7 +406,7 @@
 				CODE_SIGN_ENTITLEMENTS = Nanight/Nanight.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = 794B9SRVF4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -419,7 +419,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tanooj.Nanight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -427,6 +427,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Nanight/Nanight-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -440,7 +441,7 @@
 				CODE_SIGN_ENTITLEMENTS = Nanight/Nanight.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = 794B9SRVF4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -453,7 +454,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.2;
+				MARKETING_VERSION = 0.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tanooj.Nanight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -461,6 +462,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Nanight/Nanight-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -587,21 +589,17 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		D28556892FF8D090006293D0 /* XCRemoteSwiftPackageReference "HaishinKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/HaishinKit/HaishinKit.swift";
-			requirement = {
-				kind = exactVersion;
-				version = 2.2.5;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		D28556892FF8D090006293D0 /* XCLocalSwiftPackageReference "Vendor/HaishinKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/HaishinKit;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		D285568C2FF8D0A0006293D0 /* RTMPHaishinKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = D28556892FF8D090006293D0 /* XCRemoteSwiftPackageReference "HaishinKit" */;
+			package = D28556892FF8D090006293D0 /* XCLocalSwiftPackageReference "Vendor/HaishinKit" */;
 			productName = RTMPHaishinKit;
 		};
 /* End XCSwiftPackageProductDependency section */

@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreMedia
 import Foundation
 import Testing
@@ -5,6 +6,52 @@ import Testing
 
 @MainActor
 struct NanightTests {
+    @Test func audioStartExceptionDoesNotTerminateApp() {
+        // An unattached node raises an Objective-C exception, not a Swift Error.
+        let failure = NanightStartAudioNode(AVAudioPlayerNode())
+        #expect(failure != nil)
+    }
+
+    @Test func pausedPlaybackStaysPausedAfterWake() async throws {
+        let player = NanightRTMPPlayer()
+        let url = try #require(URL(string: "rtmps://localhost/app/stream"))
+        player.start(url: url, muted: true, paused: true)
+        player.willSleep()
+        player.didWake()
+        await Task.yield()
+        #expect(player.readyStateText == "Stream suspended during sleep")
+        #expect(player.lastErrorMessage == nil)
+        player.close()
+    }
+
+    @Test func requestedPlaybackResumesAfterWake() async throws {
+        let player = NanightRTMPPlayer()
+        player.willSleep()
+        // Invalid target proves a connection was attempted without using the network.
+        let url = try #require(URL(string: "rtmps://localhost/invalid"))
+        player.start(url: url, muted: true, paused: false)
+        #expect(player.lastErrorMessage == nil)
+        player.didWake()
+        for _ in 0..<100 where player.lastErrorMessage == nil {
+            await Task.yield()
+        }
+        #expect(player.readyStateText == "RTMPS playback failed")
+        #expect(player.lastErrorMessage != nil)
+        player.close()
+    }
+
+    @Test func closingDuringSleepCancelsPendingResume() async throws {
+        let player = NanightRTMPPlayer()
+        player.willSleep()
+        let url = try #require(URL(string: "rtmps://localhost/app/stream"))
+        player.start(url: url, muted: true, paused: false)
+        player.close()
+        player.didWake()
+        await Task.yield()
+        #expect(player.readyStateText == "RTMPS stream ready")
+        #expect(player.lastErrorMessage == nil)
+    }
+
     @Test func decodesBabyFromModernNanitShape() throws {
         let data = Data(
             """

@@ -2,7 +2,7 @@ import AVFoundation
 import CoreMedia
 import HaishinKit
 
-final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
+nonisolated final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     private struct FormatSignature: Equatable {
         let commonFormat: AVAudioCommonFormat
         let sampleRate: Double
@@ -22,6 +22,7 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     }
 
     private let queue = DispatchQueue(label: "com.tanooj.Nanight.audio-renderer")
+    private let pendingBuffers = DispatchSemaphore(value: 16)
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let prebufferCount = 8
@@ -38,6 +39,29 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     private var lastArrivalAt: Date?
     private var lastDiagnosticLogAt: Date?
     private var playbackStarted = false
+    private var bufferGeneration = 0
+    private var retryAfter: TimeInterval = 0
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(configurationChanged),
+            name: .AVAudioEngineConfigurationChange, object: engine
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func configurationChanged() {
+        queue.async {
+            self.resetPlayback(stopEngine: true)
+            self.currentFormat = nil
+            self.retryAfter = ProcessInfo.processInfo.systemUptime + 1
+            NanightLog.warning("Audio device changed; rebuilding audio output")
+        }
+    }
 
     func setEnabled(_ enabled: Bool) {
         queue.async {
@@ -57,7 +81,7 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     }
 
     func stop() {
-        queue.async {
+        queue.sync {
             self.enabled = false
             self.resetPlayback(stopEngine: true)
             self.resetDiagnostics()
@@ -66,11 +90,15 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     }
 
     func stream(_ stream: some StreamConvertible, didOutput audio: AVAudioBuffer, when: AVAudioTime) {
-        guard let audioBuffer = audio as? AVAudioPCMBuffer else {
+        guard let audioBuffer = audio as? AVAudioPCMBuffer,
+              audioBuffer.frameLength > 0, audioBuffer.format.sampleRate > 0,
+              audioBuffer.format.channelCount > 0,
+              pendingBuffers.wait(timeout: .now()) == .success else {
             return
         }
 
         queue.async {
+            defer { self.pendingBuffers.signal() }
             self.enqueue(audioBuffer)
         }
     }
@@ -79,7 +107,7 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     }
 
     private func enqueue(_ audioBuffer: AVAudioPCMBuffer) {
-        guard enabled else {
+        guard enabled, ProcessInfo.processInfo.systemUptime >= retryAfter else {
             return
         }
 
@@ -88,7 +116,8 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
         } catch {
             NanightLog.error("Audio renderer failed to start: \(error.localizedDescription)")
             resetPlayback(stopEngine: true)
-            enabled = false
+            currentFormat = nil
+            retryAfter = ProcessInfo.processInfo.systemUptime + 1
             return
         }
 
@@ -101,14 +130,18 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
 
         if queuedBuffers >= maxQueuedBuffers {
             droppedBuffers += queuedBuffers
-            resetPlayback(stopEngine: false)
+            resetPlayback(stopEngine: true)
+            currentFormat = nil
+            retryAfter = ProcessInfo.processInfo.systemUptime + 1
             NanightLog.warning("Audio renderer reset after queued buffers exceeded \(maxQueuedBuffers)")
+            return
         }
 
         queuedBuffers += 1
+        let generation = bufferGeneration
         playerNode.scheduleBuffer(audioBuffer) { [weak self] in
             self?.queue.async {
-                guard let self else {
+                guard let self, self.bufferGeneration == generation else {
                     return
                 }
                 self.queuedBuffers = max(0, self.queuedBuffers - 1)
@@ -117,7 +150,18 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
         }
 
         if !playbackStarted && queuedBuffers >= prebufferCount {
-            playerNode.play()
+            // A running engine can still lose its device between this check and play().
+            // Catch the Objective-C exception at the call boundary, then retry fresh.
+            guard let renderTime = engine.outputNode.lastRenderTime, renderTime.isSampleTimeValid else {
+                return
+            }
+            if let failure = NanightStartAudioNode(playerNode) {
+                NanightLog.error("Audio playback interrupted: \(failure)")
+                resetPlayback(stopEngine: true)
+                currentFormat = nil
+                retryAfter = ProcessInfo.processInfo.systemUptime + 1
+                return
+            }
             playbackStarted = true
             NanightLog.info("Audio renderer playback started with \(queuedBuffers) buffered packet(s)")
         }
@@ -141,6 +185,7 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
         }
 
         if !engine.isRunning {
+            resetPlayback(stopEngine: false)
             try engine.start()
         }
 
@@ -148,11 +193,12 @@ final class NanightAudioRenderer: NSObject, StreamOutput, @unchecked Sendable {
     }
 
     private func resetPlayback(stopEngine: Bool) {
+        bufferGeneration += 1
         playerNode.volume = 0
-        if playerNode.isPlaying {
+        if nodeAttached {
             playerNode.stop()
+            playerNode.reset()
         }
-        playerNode.reset()
         queuedBuffers = 0
         playbackStarted = false
 
