@@ -1,9 +1,19 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-  <channel>
-    <title>Nanight Updates</title>
-    <link>https://tluthra.github.io/nanight/</link>
-    <description>Stable releases of Nanight for macOS.</description>
-    <language>en</language>
-  </channel>
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Nanight Updates</title>
+        <link>https://tluthra.github.io/nanight/</link>
+        <description>Stable releases of Nanight for macOS.</description>
+        <language>en</language>
+        <item>
+            <title>0.0.5</title>
+            <pubDate>Mon, 14 Sep 2026 11:54:27 -0700</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>0.0.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[Nanight now checks for updates automatically when enabled. Use Check for Updates from the menu or Settings, and choose Install and Relaunch when ready. Includes activity history and release build fixes.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.5/Nanight.zip" length="4599495" type="application/octet-stream" sparkle:edSignature="bKCzcEa722a3Yc8S8TOoDVNO0ljF4WZa3MKeDFyl4N+UV1zwnxoNR19H5FXZofQi7cL9/wuaZiniWWrY6ZqTCw=="/>
+        </item>
+    </channel>
 </rss>
