@@ -19,6 +19,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private var popover: NSPopover?
     private var floatingWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var historyWindow: NSWindow?
+    private var workspaceObservers: [NSObjectProtocol] = []
     private var cancellable: AnyCancellable?
     private lazy var videoGestureInput = NanightVideoGestureInput(interaction: videoInteraction)
     private var localVideoGestureEventMonitor: Any?
@@ -49,6 +51,11 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             }
         }
 
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification] {
+            workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.model.interruptObservation() }
+            })
+        }
         installVideoGestureEventMonitor()
         NanightLog.gesture("BOOT revision=raw-events-v2 pid=\(ProcessInfo.processInfo.processIdentifier) app=\(Bundle.main.bundleURL.path)")
     }
@@ -90,6 +97,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             return
         }
 
+        model.activityExpanded = false
         popoverDebugSequence += 1
 
         let createdPopover = popover == nil
@@ -97,7 +105,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         if popover == nil {
             let popover = NSPopover()
             popover.behavior = .transient
-            popover.contentViewController = NSHostingController(rootView: cameraView(isFloating: false))
+            popover.contentViewController = NanightCameraHostingController(rootView: cameraView(isFloating: false))
             self.popover = popover
         }
 
@@ -133,8 +141,50 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 )
             },
             isFloating: isFloating,
-            toggleFloating: { [weak self] in self?.toggleFloatingWindow() }
+            toggleFloating: { [weak self] in self?.toggleFloatingWindow() },
+            toggleActivity: { [weak self] in self?.toggleActivity() },
+            openHistory: { [weak self] in self?.openHistory() }
         )
+    }
+
+    @MainActor
+    private func toggleActivity() {
+        let expanding = !model.activityExpanded
+        if expanding {
+            let screen = activeVideoView?.window?.screen ?? NSScreen.main
+            let cameraHeight = activeVideoView?.bounds.height ?? videoInteraction.viewportSize.height
+            let available = (screen?.visibleFrame.height ?? 800) - cameraHeight - 36
+            guard available >= 140 else { openHistory(); return }
+            model.activityPanelHeight = min(240, available)
+        }
+        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        model.activityExpanded = expanding
+        updateVideoContainerSize(animated: animate)
+        if let window = floatingWindow {
+            let delta = model.activityPanelHeight * (expanding ? 1 : -1)
+            var frame = window.frame
+            frame.origin.y -= delta
+            frame.size.height += delta
+            window.contentMinSize = NSSize(width: 360, height: 240 + (expanding ? model.activityPanelHeight : 0))
+            window.setFrame(frame, display: true, animate: animate)
+        }
+    }
+
+    @objc @MainActor
+    func openHistory() {
+        if historyWindow == nil {
+            let window = NSWindow(contentViewController: NSHostingController(rootView: NanightHistoryView(model: model)))
+            window.title = "Activity History"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 780, height: 620))
+            window.contentMinSize = NSSize(width: 480, height: 380)
+            window.center()
+            historyWindow = window
+        }
+        popover?.performClose(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        historyWindow?.makeKeyAndOrderFront(nil)
     }
 
     @MainActor
@@ -166,8 +216,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 360, height: 240)
-        window.contentViewController = NSHostingController(rootView: cameraView(isFloating: true).ignoresSafeArea())
+        window.contentMinSize = NSSize(width: 360, height: 240 + (model.activityExpanded ? model.activityPanelHeight : 0))
+        window.contentViewController = NanightCameraHostingController(rootView: cameraView(isFloating: true).ignoresSafeArea())
         window.setContentSize(preferredContentSize)
         window.delegate = self
         floatingWindow = window
@@ -211,6 +261,11 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func popoverDidClose(_ notification: Notification) {
         let closedPopover = notification.object as? NSPopover
+        // A pin action transfers the current view to the floating window.
+        // Otherwise, dismissing the popover also dismisses its activity section.
+        if floatingWindow == nil {
+            model.activityExpanded = false
+        }
         NanightLog.info("Popover #\(popoverDebugSequence) didClose notificationPopoverShown=\(closedPopover?.isShown == true) storedPopoverShown=\(popover?.isShown == true)")
         videoGestureHeartbeat?.cancel()
         videoGestureHeartbeat = nil
@@ -227,7 +282,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         switch model.connectionState {
         case .signedIn, .offline:
             let videoSize = videoInteraction.viewportSize
-            return NSSize(width: videoSize.width, height: videoSize.height)
+            return NSSize(width: videoSize.width, height: videoSize.height + (model.activityExpanded ? model.activityPanelHeight : 0))
         case .signedOut, .authExpired, .mfaRequired, .restoring:
             return defaultPopoverContentSize
         }
@@ -268,7 +323,13 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             let momentum: NSEvent.Phase = event.type == .scrollWheel ? event.momentumPhase : []
             let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
             let pointer = view.convert(mouseInWindow, from: nil)
-            let inside = view.bounds.contains(pointer)
+            var cameraBounds = view.bounds
+            if self.model.activityExpanded {
+                cameraBounds.size.height = max(0, cameraBounds.height - self.model.activityPanelHeight)
+                if !view.isFlipped { cameraBounds.origin.y += self.model.activityPanelHeight }
+            }
+            let inside = cameraBounds.contains(pointer)
+            guard inside || self.videoGestureInput.ownsSequence else { return event }
             let acceptedWindow = NanightVideoGestureInput.routesToPopover(
                 eventWindowNumber: event.windowNumber, popoverWindowNumber: window.windowNumber,
                 popoverIsKey: window.isKeyWindow, pointerInside: inside,
@@ -285,10 +346,10 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             let location = event.windowNumber == window.windowNumber
                 ? view.convert(event.locationInWindow, from: nil) : pointer
             var input = NanightVideoGestureEvent(type: event.type, phase: phase, momentumPhase: momentum)
-            input.anchor = CGPoint(x: location.x - view.bounds.midX,
-                                   y: (location.y - view.bounds.midY) * (view.isFlipped ? 1 : -1))
+            input.anchor = CGPoint(x: location.x - cameraBounds.midX,
+                                   y: (location.y - cameraBounds.midY) * (view.isFlipped ? 1 : -1))
             let viewport = self.videoInteraction.viewportSize
-            let fitScale = max(0.001, min(view.bounds.width / viewport.width, view.bounds.height / viewport.height))
+            let fitScale = max(0.001, min(cameraBounds.width / viewport.width, cameraBounds.height / viewport.height))
             input.anchor.x /= fitScale
             input.anchor.y /= fitScale
             // These NSEvent accessors are valid only for their corresponding types.
@@ -335,6 +396,11 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     private func updateVideoContainerSize(animated: Bool) {
+        if floatingWindow == nil, model.activityExpanded {
+            let available = (statusItem?.button?.window?.screen?.visibleFrame.height ?? 800) - videoInteraction.viewportSize.height - 36
+            if available < 140 { model.activityExpanded = false }
+            else { model.activityPanelHeight = min(240, available) }
+        }
         let nextSize = preferredContentSize
 
         if let popover {
@@ -441,6 +507,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: model.activeCamera?.name ?? "Nanight", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Activity History", action: #selector(openHistory), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -483,6 +550,20 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApplication.shared.terminate(nil)
     }
 
+}
+
+// The delegate owns camera-container sizing. Inserting history must not also
+// change the host's intrinsic/minimum size before the AppKit resize begins.
+final class NanightCameraHostingController<Content: View>: NSViewController {
+    init(rootView: Content) {
+        super.init(nibName: nil, bundle: nil)
+        let host = NSHostingView(rootView: rootView)
+        host.sizingOptions = []
+        view = host
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(rootView:)") }
 }
 
 private extension NSPopover {

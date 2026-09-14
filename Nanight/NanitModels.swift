@@ -212,7 +212,7 @@ struct NurseryActivity: Equatable {
     var lastSoundAt: Date?
 
     static func current(
-        from events: [NanitCloudEvent],
+        from events: [  ],
         now: Date = Date(),
         activeWindow: TimeInterval
     ) -> NurseryActivity {

@@ -30,6 +30,29 @@ final class NanightAppModel: ObservableObject {
     @Published var cameraStatusText: String = "Not connected"
     @Published var streamStatusText: String = "Stream unavailable"
 
+    let activityStore: NanightActivityStore
+    @Published var historyRevision = 0
+    @Published var historyError: String?
+    @Published var selectedHistoryDay: Date?
+    @Published var activityExpanded = false
+    @Published var activityPanelHeight: CGFloat = 240
+    private var observationSession = UUID()
+
+    func clearActivityHistory() async {
+        observationSession = UUID()
+        do {
+            try await activityStore.clear()
+            observationSession = UUID()
+            historyRevision += 1
+            historyError = nil
+        } catch {
+            historyError = "Could not clear history: \(error.localizedDescription)"
+        }
+    }
+
+    // Called before sleep and after wake, including short sleeps between polls.
+    func interruptObservation() { observationSession = UUID() }
+
     private static let audioMutedStorageKey = "NanightAudioMuted"
 
     private let api: NanitAPIClient
@@ -63,11 +86,13 @@ final class NanightAppModel: ObservableObject {
     init(
         api: NanitAPIClient,
         keychain: KeychainTokenStore,
-        notifications: NanitNotificationController
+        notifications: NanitNotificationController,
+        activityStore: NanightActivityStore = NanightActivityStore()
     ) {
         self.api = api
         self.keychain = keychain
         self.notifications = notifications
+        self.activityStore = activityStore
         self.settings = NanitUserSettings.load()
         self.audioMuted = UserDefaults.standard.object(forKey: Self.audioMutedStorageKey) as? Bool ?? true
 
@@ -372,6 +397,7 @@ final class NanightAppModel: ObservableObject {
     }
 
     func startMonitoring() {
+        observationSession = UUID()
         monitorTask?.cancel()
 
         guard isAuthenticated else {
@@ -390,6 +416,7 @@ final class NanightAppModel: ObservableObject {
     }
 
     func stopMonitoring() {
+        observationSession = UUID()
         NanightLog.info("Stopping activity polling")
         monitorTask?.cancel()
         monitorTask = nil
@@ -402,9 +429,21 @@ final class NanightAppModel: ObservableObject {
         }
 
         let generation = authGeneration
+        let session = observationSession
         do {
             let accessToken = try await validAccessToken()
             let events = try await api.messages(accessToken: accessToken, babyUID: camera.uid, limit: 20)
+            guard session == observationSession else { return }
+            guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
+            do {
+                try await activityStore.record(camera: camera.uid, events: events.map {
+                    NanightHistoryEvent(timestamp: Date(timeIntervalSince1970: $0.timestamp), kind: $0.eventType)
+                }, at: Date(), session: session)
+                historyRevision += 1
+                historyError = nil
+            } catch {
+                historyError = "Could not save activity: \(error.localizedDescription)"
+            }
             await refreshClimate(accessToken: accessToken, camera: camera)
             guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
             var newActivity = NurseryActivity.current(
@@ -438,12 +477,15 @@ final class NanightAppModel: ObservableObject {
             NanightLog.info("Event refresh succeeded for \(camera.name): motion=\(newActivity.motionActive), sound=\(newActivity.soundActive)")
         } catch {
             guard generation == authGeneration, !Task.isCancelled, activeCamera?.uid == camera.uid else { return }
+            observationSession = UUID()
             NanightLog.error("Event refresh failed: \(userFacing(error))")
             markOffline(error)
         }
     }
 
     func signOut() {
+        observationSession = UUID()
+        activityExpanded = false
         NanightLog.info("Signing out")
         authGeneration += 1
         tokenRefreshTask?.cancel()

@@ -6,9 +6,11 @@ import SwiftUI
 struct NanightMenuView: View {
     @ObservedObject var model: NanightAppModel
     let videoInteraction: NanightVideoInteraction
-    let takeScreenshot: @MainActor () async throws -> URL
+    let takeScreenshot: @MainActor @Sendable () async throws -> URL
     var isFloating = false
     var toggleFloating: () -> Void = {}
+    var toggleActivity: () -> Void = {}
+    var openHistory: () -> Void = {}
 
     var body: some View {
         Group {
@@ -26,7 +28,22 @@ struct NanightMenuView: View {
                     .frame(width: 360)
                     .padding(16)
             case .signedIn, .offline:
-                MonitorView(model: model, videoInteraction: videoInteraction, takeScreenshot: takeScreenshot, isFloating: isFloating, toggleFloating: toggleFloating)
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        MonitorView(model: model, videoInteraction: videoInteraction, takeScreenshot: takeScreenshot, isFloating: isFloating, toggleFloating: toggleFloating, toggleActivity: toggleActivity)
+                        if model.activityExpanded {
+                            Divider()
+                            NanightHistoryView(model: model, compact: true, openHistory: openHistory)
+                                .frame(height: model.activityPanelHeight - 1)
+                        }
+                    }
+                    // Keep the camera at its natural height while AppKit animates the
+                    // popover's bounds. Reveal the history below it instead of centering
+                    // the taller stack inside each intermediate animation frame.
+                    .fixedSize(horizontal: false, vertical: !isFloating)
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                    .clipped()
+                }
             }
         }
     }
@@ -128,9 +145,10 @@ private struct BusyGlyph: View {
 private struct MonitorView: View {
     @ObservedObject var model: NanightAppModel
     @ObservedObject var videoInteraction: NanightVideoInteraction
-    let takeScreenshot: @MainActor () async throws -> URL
+    let takeScreenshot: @MainActor @Sendable () async throws -> URL
     var isFloating = false
     var toggleFloating: () -> Void = {}
+    var toggleActivity: () -> Void = {}
     @State private var isTakingScreenshot = false
     @State private var screenshotSaved = false
     @State private var screenshotFlash = false
@@ -220,6 +238,14 @@ private struct MonitorView: View {
                         Spacer()
 
                         OverlayButton(
+                            systemName: "chart.bar.xaxis",
+                            help: model.activityExpanded ? "Hide activity" : "Show activity",
+                            isSelected: model.activityExpanded,
+                            action: toggleActivity
+                        )
+                        .accessibilityLabel(model.activityExpanded ? "Hide activity" : "Show activity")
+
+                        OverlayButton(
                             systemName: isFloating ? "pin.fill" : "pin",
                             help: isFloating ? "Unpin window" : "Pin window",
                             isSelected: isFloating,
@@ -248,7 +274,7 @@ private struct MonitorView: View {
         .frame(width: isFloating ? nil : viewportSize.width, height: isFloating ? nil : viewportSize.height)
         // Fill the hosting view throughout AppKit's resize, including the safe
         // area at the popover edge. The popover supplies the outer corner shape.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.ignoresSafeArea())
         .overlay {
             Color.white.opacity(screenshotFlash ? 0.7 : 0)
@@ -496,6 +522,7 @@ private struct DisclaimerView: View {
 
 struct SettingsView: View {
     @ObservedObject var model: NanightAppModel
+    @State private var confirmClearHistory = false
 
     var body: some View {
         Form {
@@ -617,6 +644,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Activity history") {
+                Text("Activity is stored only on this Mac and kept indefinitely. No video or audio is recorded.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Clear history…", role: .destructive) { confirmClearHistory = true }
+                if let error = model.historyError { Text(error).font(.caption).foregroundStyle(.red) }
+            }
+
             Section("Diagnostics") {
                 Button("Copy Diagnostics") {
                     model.copyDiagnosticsToPasteboard()
@@ -626,6 +660,12 @@ struct SettingsView: View {
                     Link(reference.title, destination: reference.url)
                 }
             }
+        }
+        .alert("Clear all activity history?", isPresented: $confirmClearHistory) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear history", role: .destructive) { Task { await model.clearActivityHistory() } }
+        } message: {
+            Text("This permanently deletes saved activity for every camera on this Mac. New activity will continue to be recorded.")
         }
         .formStyle(.grouped)
         .tint(.accentColor)
