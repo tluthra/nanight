@@ -6,6 +6,16 @@
         <description>Stable releases of Nanight for macOS.</description>
         <language>en</language>
         <item>
+            <title>0.0.6</title>
+            <pubDate>Mon, 14 Sep 2026 12:43:05 -0700</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>0.0.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[The screenshot button now sits beside the audio control for easier access. Development builds also show a distinct menu-bar indicator.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.6/Nanight.zip" length="4599297" type="application/octet-stream" sparkle:edSignature="Zsfyzoao5Qng+38rXu8vQhpNEW/e5CdV1Xz85RW1VSyLDG5l5bUscEDiwzJUomq0P6AfZWaTGApnIaoI1ps3Dw=="/>
+        </item>
+        <item>
             <title>0.0.5</title>
             <pubDate>Mon, 14 Sep 2026 11:54:27 -0700</pubDate>
             <sparkle:version>8</sparkle:version>
