@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111a29">
+  <meta name="description" content="Nanight, an unofficial Nanit viewer for your Mac.">
+  <title>Nanight</title>
+  <link rel="icon" href="assets/nanight.png">
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111a29; color: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 50% 28%, #202e43 0, #111a29 65%); }
+    a { color: inherit; }
+    a:focus-visible { outline: 3px solid #c8d9ff; outline-offset: 6px; }
+    .sky { position: absolute; inset: 0 0 auto; width: 100%; height: 850px; pointer-events: none; }
+    .mobile-stars { display: none; }
+    .clouds { position: absolute; top: 320px; left: 0; width: 50%; height: 480px; pointer-events: none; mask-image: linear-gradient(to right, #000 80%, transparent); }
+    .clouds-right { left: auto; right: 0; mask-image: linear-gradient(to left, #000 80%, transparent); }
+    .github { position: absolute; z-index: 1; top: 30px; right: 38px; display: inline-flex; align-items: center; gap: 9px; text-decoration: none; font-size: 14px; font-weight: 600; color: #c5cbd6; }
+    .github:hover { color: white; }
+    .github svg { width: 20px; height: 20px; }
+    main { position: relative; padding: 100px 24px 64px; text-align: center; }
+    .logo { position: relative; width: 120px; height: 120px; margin: 0 auto 25px; overflow: hidden; border: 5px solid #fff; border-radius: 25%; box-shadow: 0 12px 35px #0003; }
+    .logo img { position: absolute; width: 114%; height: 114%; max-width: none; left: -7%; top: -5.5%; }
+    h1 { font-family: ui-rounded, "Arial Rounded MT Bold", -apple-system, BlinkMacSystemFont, sans-serif; font-size: clamp(56px, 8vw, 76px); font-weight: 900; line-height: 1.08; letter-spacing: -3px; margin: 0; }
+    .disclaimer { color: #aeb8c9; font-size: 14px; margin: 15px 0 29px; }
+    .download { display: inline-flex; align-items: center; justify-content: center; gap: 11px; min-height: 54px; padding: 0 25px; border-radius: 12px; background: #faf9f6; color: #172030; text-decoration: none; font-size: 16px; font-weight: 650; box-shadow: 0 2px 3px #0002, inset 0 1px 0 #fff; transition: background .15s, transform .15s; }
+    .download svg { width: 22px; height: 25px; }
+    .download:hover { background: #e6ebf3; transform: translateY(-2px); }
+    .photo { width: min(100%, 1040px); margin: 64px auto 0; border: 1px solid #ffffff65; border-radius: 20px; background: #192435; box-shadow: 0 0 24px #ffffff18, 0 0 64px #ffffff0d, 0 30px 90px #0002; overflow: hidden; }
+    .photo img { display: block; width: 100%; height: auto; }
+    @media (max-width: 600px) {
+      .github { top: 24px; right: 24px; }
+      main { padding-top: 102px; }
+      .logo { width: 104px; height: 104px; }
+      .photo { margin-top: 48px; border-radius: 12px; }
+      .sky { display: none; height: 700px; }
+      .mobile-stars { display: block; }
+      .clouds { top: 355px; height: 330px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .download { transition: none; } }
+  </style>
+</head>
+<body>
+  <svg class="sky" viewBox="0 0 1440 850" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+    <defs><path id="star" d="M0 -13 C2 -4 4 -2 12 0 C4 2 2 4 0 13 C-2 4 -4 2 -12 0 C-4 -2 -2 -4 0 -13Z"/></defs>
+    <g fill="#f8f6ef">
+      <use href="#star" transform="translate(155 163) scale(.85)" opacity=".85"/>
+      <use href="#star" transform="translate(360 82) scale(.45)" opacity=".6"/>
+      <use href="#star" transform="translate(1090 137) scale(.8)" opacity=".9"/>
+      <use href="#star" transform="translate(1270 302) scale(.55)" opacity=".7"/>
+      <use href="#star" transform="translate(291 353) scale(.55)" opacity=".8"/>
+      <use href="#star" transform="translate(116 506) scale(.4)" opacity=".6"/>
+      <use href="#star" transform="translate(1017 394) scale(.4)" opacity=".7"/>
+      <use href="#star" transform="translate(1335 635) scale(.6)" opacity=".55"/>
+      <use href="#star" transform="translate(449 215) scale(.3)" opacity=".6"/>
+      <use href="#star" transform="translate(951 60) scale(.3)" opacity=".5"/>
+      <use href="#star" transform="translate(70 280) scale(0.4)" opacity=".65"/>
+      <use href="#star" transform="translate(230 55) scale(0.3)" opacity=".65"/>
+      <use href="#star" transform="translate(325 170) scale(0.6)" opacity=".65"/>
+      <use href="#star" transform="translate(420 315) scale(0.4)" opacity=".65"/>
+      <use href="#star" transform="translate(550 135) scale(0.3)" opacity=".65"/>
+      <use href="#star" transform="translate(615 45) scale(0.4)" opacity=".65"/>
+      <use href="#star" transform="translate(805 65) scale(0.3)" opacity=".65"/>
+      <use href="#star" transform="translate(905 185) scale(0.45)" opacity=".65"/>
+      <use href="#star" transform="translate(1190 70) scale(0.5)" opacity=".65"/>
+      <use href="#star" transform="translate(1350 235) scale(0.4)" opacity=".65"/>
+      <use href="#star" transform="translate(1120 310) scale(0.6)" opacity=".65"/>
+      <use href="#star" transform="translate(175 340) scale(0.3)" opacity=".65"/>
+      <use href="#star" transform="translate(360 465) scale(0.35)" opacity=".65"/>
+      <use href="#star" transform="translate(940 450) scale(0.35)" opacity=".65"/>
+      <use href="#star" transform="translate(1240 520) scale(0.35)" opacity=".65"/>
+      <use href="#star" transform="translate(55 585) scale(0.5)" opacity=".65"/>
+      <use href="#star" transform="translate(1390 740) scale(0.45)" opacity=".65"/>
+    </g>
+    <g fill="#f8f6ef" opacity=".45">
+      <circle cx="195" cy="110" r="1.3"/>
+      <circle cx="410" cy="35" r="1.3"/>
+      <circle cx="570" cy="290" r="1.3"/>
+      <circle cx="835" cy="130" r="1.3"/>
+      <circle cx="1025" cy="245" r="1.3"/>
+      <circle cx="1230" cy="170" r="1.3"/>
+      <circle cx="65" cy="390" r="1.3"/>
+      <circle cx="230" cy="460" r="1.3"/>
+      <circle cx="460" cy="390" r="1.3"/>
+      <circle cx="975" cy="330" r="1.3"/>
+      <circle cx="1160" cy="410" r="1.3"/>
+      <circle cx="1395" cy="375" r="1.3"/>
+      <circle cx="310" cy="290" r="1.3"/>
+      <circle cx="480" cy="120" r="1.3"/>
+      <circle cx="890" cy="285" r="1.3"/>
+      <circle cx="770" cy="32" r="1.3"/>
+      <circle cx="1080" cy="45" r="1.3"/>
+      <circle cx="1300" cy="80" r="1.3"/>
+      <circle cx="90" cy="79" r="1.5"/><circle cx="264" cy="246" r="2"/>
+      <circle cx="520" cy="64" r="1.5"/><circle cx="1190" cy="220" r="1.5"/>
+      <circle cx="1370" cy="123" r="2"/><circle cx="1100" cy="495" r="1.5"/>
+      <circle cx="188" cy="410" r="1.5"/><circle cx="81" cy="705" r="1.5"/>
+      <circle cx="1300" cy="450" r="2"/><circle cx="405" cy="445" r="1.5"/>
+    </g>
+  </svg>
+  <svg class="sky mobile-stars" viewBox="0 0 390 700" aria-hidden="true">
+    <g fill="#f8f6ef" opacity=".7">
+      <use href="#star" transform="translate(39 136) scale(.45)"/>
+      <use href="#star" transform="translate(328 199) scale(.55)"/>
+      <use href="#star" transform="translate(57 305) scale(.35)"/>
+      <use href="#star" transform="translate(354 405) scale(.4)"/>
+      <use href="#star" transform="translate(103 72) scale(.25)"/>
+      <use href="#star" transform="translate(65 210) scale(0.3)"/>
+      <use href="#star" transform="translate(284 112) scale(0.35)"/>
+      <use href="#star" transform="translate(356 280) scale(0.4)"/>
+      <use href="#star" transform="translate(29 56) scale(0.3)"/>
+      <use href="#star" transform="translate(300 333) scale(0.25)"/>
+      <use href="#star" transform="translate(87 421) scale(0.3)"/>
+      <use href="#star" transform="translate(240 65) scale(0.25)"/>
+      <use href="#star" transform="translate(19 245) scale(0.25)"/>
+      <circle cx="78" cy="162" r="1"/><circle cx="303" cy="250" r="1"/><circle cx="20" cy="342" r="1"/>
+      <circle cx="32" cy="390" r="1"/><circle cx="348" cy="94" r="1.5"/>
+    </g>
+  </svg>
+  <svg class="clouds" viewBox="0 0 720 480" preserveAspectRatio="xMinYMin slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="cloud-back" x2="0" y2="1"><stop stop-color="#303d50"/><stop offset="1" stop-color="#182334" stop-opacity="0"/></linearGradient>
+      <linearGradient id="cloud-front" x2="0" y2="1"><stop stop-color="#263346"/><stop offset="1" stop-color="#111a29" stop-opacity="0"/></linearGradient>
+    </defs>
+    <g id="cloud-bank">
+    <path fill="url(#cloud-back)" d="M0 35 C48 12 104 43 106 102 C137 82 183 109 185 146 C224 122 280 146 284 193 C332 172 384 201 389 244 C449 219 504 253 510 288 C576 269 617 303 627 337 C683 304 742 308 773 340 C797 291 854 274 901 297 C908 247 957 221 1002 242 C1010 185 1061 157 1111 179 C1120 133 1165 102 1210 124 C1210 76 1270 44 1315 74 C1332 20 1392 6 1440 28 L1440 480 H0Z"/>
+    <path fill="url(#cloud-front)" d="M0 119 C41 94 85 127 88 166 C137 144 187 181 191 225 C232 202 281 231 284 271 C335 250 385 277 391 319 C437 295 491 321 498 360 C546 334 593 355 607 391 C666 363 724 369 747 407 C772 364 827 343 873 364 C879 320 928 292 971 312 C983 270 1023 252 1065 270 C1072 220 1117 188 1162 208 C1179 163 1230 149 1267 174 C1273 118 1332 90 1378 118 C1390 98 1418 96 1440 106 L1440 480 H0Z"/>
+    </g>
+  </svg>
+  <svg class="clouds clouds-right" viewBox="720 0 720 480" preserveAspectRatio="xMaxYMin slice" aria-hidden="true">
+    <use href="#cloud-bank"/>
+  </svg>
+  <a class="github" href="https://github.com/tluthra/nanight" aria-label="Nanight on GitHub">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .75a11.25 11.25 0 0 0-3.558 21.923c.563.103.773-.244.773-.543 0-.267-.01-1.155-.015-2.096-3.13.68-3.79-1.329-3.79-1.329-.512-1.3-1.25-1.646-1.25-1.646-1.022-.699.077-.684.077-.684 1.13.079 1.725 1.16 1.725 1.16 1.005 1.723 2.636 1.225 3.28.937.102-.728.393-1.225.715-1.507-2.5-.284-5.128-1.25-5.128-5.562 0-1.23.44-2.233 1.16-3.022-.117-.285-.503-1.43.11-2.98 0 0 .944-.302 3.094 1.155a10.8 10.8 0 0 1 5.625 0c2.149-1.457 3.09-1.155 3.09-1.155.615 1.55.23 2.695.113 2.98.722.789 1.158 1.792 1.158 3.022 0 4.322-2.632 5.275-5.14 5.554.404.35.765 1.04.765 2.097 0 1.515-.015 2.736-.015 3.109 0 .302.203.651.774.54A11.252 11.252 0 0 0 12 .75Z"/></svg>
+    GitHub
+  </a>
+  <main>
+    <div class="logo"><img src="assets/nanight.png" alt="Nanight's smiling crescent moon and stars" width="512" height="512"></div>
+    <h1>Nanight</h1>
+    <p class="disclaimer">(not affiliated to Nanit)</p>
+    <a class="download" href="https://github.com/tluthra/nanight/releases/latest/download/Nanight.zip">
+      <svg viewBox="0 0 24 28" fill="currentColor" aria-hidden="true"><path d="M18.7 14.8c0-3.1 2.5-4.6 2.6-4.7-1.4-2.1-3.6-2.4-4.4-2.4-1.9-.2-3.7 1.1-4.6 1.1-.9 0-2.4-1.1-3.9-1-2 .1-3.9 1.2-4.9 3-2.1 3.6-.5 8.9 1.5 11.8 1 1.4 2.1 3 3.6 2.9 1.5-.1 2-1 3.8-1 1.8 0 2.3 1 3.9 1 1.6 0 2.6-1.4 3.5-2.9 1.1-1.6 1.6-3.2 1.6-3.3-.1 0-2.7-1-2.7-4.5ZM15.7 5.8c.8-1 1.4-2.4 1.2-3.8-1.2.1-2.6.8-3.5 1.8-.8.9-1.5 2.3-1.3 3.6 1.3.1 2.7-.7 3.6-1.6Z"/></svg>
+      Download for Mac
+    </a>
+    <div class="photo">
+      <img src="assets/nanight-desktop-cropped.jpg" alt="Nanight on a Mac desktop, showing a sleeping baby in the live camera view" width="932" height="549">
+    </div>
+  </main>
+</body>
+</html>
