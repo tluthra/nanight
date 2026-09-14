@@ -1,4 +1,4 @@
-<h1><img src="Nanight/Assets.xcassets/AppIcon.appiconset/nanight-icon-128.png" alt="" width="56" height="56" align="middle"> Nanight</h1>
+<h1><img src="assets/readme-header.svg" alt="Nanight" width="250" height="64"></h1>
 
 An unofficial native macOS menu bar app for viewing your Nanit camera from your desktop.
 
