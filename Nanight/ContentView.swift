@@ -219,20 +219,20 @@ private struct MonitorView: View {
                     Spacer()
 
                     HStack(alignment: .bottom, spacing: 10) {
-                        VStack(spacing: 10) {
-                            OverlayButton(
-                                systemName: screenshotSaved ? "checkmark" : "camera.fill",
-                                help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
-                                action: saveScreenshot
-                            )
-                            .disabled(isTakingScreenshot)
-
+                        HStack(spacing: 10) {
                             OverlayButton(
                                 systemName: model.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                                 help: model.isAudioMuted ? "Unmute audio" : "Mute audio",
                                 foregroundColor: model.isAudioMuted ? .red : .white,
                                 action: model.toggleAudio
                             )
+
+                            OverlayButton(
+                                systemName: screenshotSaved ? "checkmark" : "camera.fill",
+                                help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
+                                action: saveScreenshot
+                            )
+                            .disabled(isTakingScreenshot)
                         }
 
                         Spacer()

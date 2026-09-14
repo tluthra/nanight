@@ -41,7 +41,14 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         self.statusItem = statusItem
 
         if let button = statusItem.button {
+            #if DEBUG
+            statusItem.length = NSStatusItem.variableLength
+            button.imagePosition = .imageLeft
+            button.title = " 🐞"
+            button.toolTip = "Nanight (Development)"
+            #else
             button.imagePosition = .imageOnly
+            #endif
             button.action = #selector(statusItemClicked(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
