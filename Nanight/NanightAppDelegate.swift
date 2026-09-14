@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Sparkle
 import SwiftUI
 
 enum NanightMenuBarIconState: Equatable {
@@ -13,6 +14,7 @@ enum NanightMenuBarIconState: Equatable {
 
 final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     @MainActor let model = NanightAppModel()
+    @MainActor let updater = NanightUpdater()
     @MainActor private let videoInteraction = NanightVideoInteraction()
 
     private var statusItem: NSStatusItem?
@@ -34,6 +36,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
+        updater.start()
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.statusItem = statusItem
 
@@ -509,6 +512,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Activity History", action: #selector(openHistory), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        menu.addItem(updateItem)
         menu.addItem(NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Nanight", action: #selector(quit), keyEquivalent: "q"))
@@ -517,6 +522,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             item.target = self
             item.image = nil
         }
+        updateItem.target = updater.controller
 
         statusItem?.menu = menu
         sender.performClick(nil)
@@ -527,7 +533,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model, updater: updater)))
             window.title = "Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
@@ -555,6 +561,10 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 // The delegate owns camera-container sizing. Inserting history must not also
 // change the host's intrinsic/minimum size before the AppKit resize begins.
 final class NanightCameraHostingController<Content: View>: NSViewController {
+    // Avoid Swift 6.3's optimizer crash in synthesized generic deinitializers.
+    // https://github.com/swiftlang/swift/issues/87736
+    @inline(never) deinit {}
+
     init(rootView: Content) {
         super.init(nibName: nil, bundle: nil)
         let host = NSHostingView(rootView: rootView)

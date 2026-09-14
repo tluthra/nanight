@@ -97,6 +97,19 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 echo "Verifying code signature..."
+# A plain xcodebuild build does not re-sign Sparkle's nested helper tools.
+# Sign from the inside out, retaining each helper's own entitlements.
+SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
+if [[ -d "$SPARKLE_FRAMEWORK" && -n "$SIGNING_IDENTITY" ]]; then
+  for helper in XPCServices/Installer.xpc XPCServices/Downloader.xpc Autoupdate Updater.app; do
+    codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp \
+      --preserve-metadata=entitlements "$SPARKLE_FRAMEWORK/$helper"
+  done
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp \
+    "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp \
+    --preserve-metadata=entitlements "$APP_PATH"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 echo "Creating $ZIP_PATH..."

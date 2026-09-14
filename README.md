@@ -70,11 +70,12 @@ NOTARIZE=1 \
 <details>
 <summary><strong>Publish a GitHub release</strong></summary>
 
-To create or update a release and upload the ZIP, substitute your release tag for `v1.0`:
+Increase both the marketing version and build number in Xcode, then commit and
+push the code and matching `v<version>` tag. To build, notarize, and publish:
 
 ```sh
-gh auth login
-./scripts/release-github.sh v1.0
+NOTARIZE=1 SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_KEYCHAIN_PROFILE="nanight-notary" ./scripts/release-github.sh v0.0.5
 ```
 
 By default, the release upload requires `Nanight.app` to be Developer ID signed with a valid stapled notarization ticket.
@@ -82,14 +83,46 @@ By default, the release upload requires `Nanight.app` to be Developer ID signed 
 To upload an already-built, notarized ZIP:
 
 ```sh
-BUILD=0 ./scripts/release-github.sh v1.0
+BUILD=0 ZIP_PATH="$PWD/dist/v0.0.5/Nanight.zip" \
+SPARKLE_BIN="$PWD/build/Release-v0.0.5/SourcePackages/artifacts/sparkle/Sparkle/bin" \
+./scripts/release-github.sh v0.0.5
 ```
 
 Keep the uploaded asset named `Nanight.zip` so the download link follows the latest release.
 
-Set `ALLOW_UNNOTARIZED=1` only for internal test releases where you expect Gatekeeper warnings.
+Stable releases generate and verify an Ed25519-signed update entry, upload the ZIP,
+verify the downloaded bytes, and commit `appcast.xml` to `main` through the GitHub
+API. The existing GitHub Pages site serves it at
+`https://tluthra.github.io/nanight/appcast.xml`. Run `git pull --ff-only` afterward
+to pick up the feed commit. Both version and build number must increase.
+
+Drafts (`DRAFT=1`) and prereleases (`PRERELEASE=1`) never update the stable feed.
+`ALLOW_UNNOTARIZED=1` is only accepted for these internal builds. Published ZIPs
+are immutable; a retry must use identical bytes. If upload succeeds but feed
+publishing fails, rerun with `BUILD=0` and the same ZIP.
 
 </details>
+
+## Automatic updates
+
+Starting with 0.0.5, Nanight uses Sparkle 2. On second launch it asks whether to
+check for updates automatically. Checks run daily while the app is open. Users
+can change this in Settings or choose **Check for Updates…** from the menu at any
+time. Installing an update always requires a click, so a background check does
+not restart camera viewing. Users on an older version must download 0.0.5 once.
+
+The Sparkle private key is stored in the releasing Mac's login Keychain under
+account `com.tanooj.Nanight`. Only the public key is committed in
+`Configuration/Info.plist`. `SPARKLE_KEY_ACCOUNT` can select another account when
+using this workflow for a fork, whose public key and feed URL must also change.
+
+Keep a secure backup of that key. Sparkle's `generate_keys --account
+com.tanooj.Nanight -x <secure-backup-path>` exports it for a password manager or
+encrypted backup; never commit the export. On another release Mac, import it
+with `generate_keys --account com.tanooj.Nanight -f <secure-backup-path>`.
+
+Run release metadata checks with
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests`.
 
 ## Important notes
 

@@ -6,9 +6,12 @@ struct NanightApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(model: appDelegate.model)
+            SettingsView(model: appDelegate.model, updater: appDelegate.updater)
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton(updater: appDelegate.updater)
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings") {
                     appDelegate.openSettings()

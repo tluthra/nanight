@@ -522,6 +522,7 @@ private struct DisclaimerView: View {
 
 struct SettingsView: View {
     @ObservedObject var model: NanightAppModel
+    @ObservedObject var updater: NanightUpdater
     @State private var confirmClearHistory = false
 
     var body: some View {
@@ -649,6 +650,16 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Clear history…", role: .destructive) { confirmClearHistory = true }
                 if let error = model.historyError { Text(error).font(.caption).foregroundStyle(.red) }
+            }
+
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.setAutomaticallyChecksForUpdates($0) }
+                ))
+                CheckForUpdatesButton(updater: updater)
+                Text("Updates install only when you choose to install and relaunch Nanight.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Diagnostics") {
