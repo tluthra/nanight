@@ -181,6 +181,10 @@ private struct MonitorView: View {
                 .background(Color.black)
                 .clipped()
 
+                if isFloating {
+                    PinnedWindowDragSurface()
+                }
+
                 VStack {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -463,6 +467,24 @@ private struct LiveStatusRow: View {
         }
 
         return "\(Int(humidityPercent.rounded()))%"
+    }
+}
+
+// Keep window dragging independent of the player and hosting view's implicit
+// background-drag behavior. The camera controls remain above this surface.
+private struct PinnedWindowDragSurface: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView { DragView() }
+
+    func updateNSView(_ nsView: DragView, context: Context) {}
+
+    final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
     }
 }
 
