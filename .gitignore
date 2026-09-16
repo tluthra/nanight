@@ -12,6 +12,20 @@ dist/
 *.dSYM
 *.dSYM.zip
 
+# Generated Core ML models (keep the source .mlpackage and its weights)
+*.mlmodelc/
+
+# Private local evaluation data. Keep photos outside this repository;
+# these paths are only a backstop against accidental local copies.
+/Nanight-private/
+/private-eval/
+/eval/
+
+# Local activity databases and SQLite sidecars
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # Swift Package Manager
 .build/
 
