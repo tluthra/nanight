@@ -86,6 +86,12 @@ struct ActivityHistoryRenderingTests {
             let events = Int(offset) % 2700 == 0 ? [NanightHistoryEvent(timestamp: time, kind: "MOTION")] : []
             try await store.record(camera: "preview", events: events, at: time, session: session)
         }
+        for offset in stride(from: 3600.0, through: 5 * 3600, by: 3) {
+            _ = try await store.recordSignal(camera: "preview", observation: NanightSignalObservation(
+                timestamp: start.addingTimeInterval(offset), session: session, kind: .sample,
+                babySimilarity: 0.3, emptySimilarity: 0.2, changedFraction: 0,
+                brightnessChange: 0, motionValid: true))
+        }
         let model = NanightAppModel(api: NanitAPIClient(), keychain: KeychainTokenStore(), notifications: NanitNotificationController(), activityStore: store)
         model.cameras = [NanitBaby(uid: "preview", name: "Nursery", cameraUID: "preview")]
         model.connectionState = .signedIn

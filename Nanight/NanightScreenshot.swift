@@ -24,31 +24,7 @@ enum NanightScreenshot {
         let rotation = interaction.rotationDegrees
         let offset = interaction.offset
         let aspectFit = model.player != nil
-        let buffer: CVPixelBuffer
-        if let player = model.player, let item = player.currentItem {
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ])
-            item.add(output)
-            defer { item.remove(output) }
-            var frame: CVPixelBuffer?
-            for _ in 0..<20 {
-                try await Task.sleep(nanoseconds: 25_000_000)
-                guard player.currentItem === item else { throw NanightScreenshotError.imageUnavailable }
-                frame = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
-                if frame != nil { break }
-            }
-            guard let frame else { throw NanightScreenshotError.imageUnavailable }
-            buffer = frame
-        } else if let frame = model.rtmpPlayer?.screenshotPixelBuffer {
-            buffer = frame
-        } else {
-            throw NanightScreenshotError.imageUnavailable
-        }
-        let source = CIImage(cvPixelBuffer: buffer)
-        guard let frame = CIContext().createCGImage(source, from: source.extent) else {
-            throw NanightScreenshotError.imageUnavailable
-        }
+        let frame = try await captureFrame(model: model)
         let image = try render(frame: frame, viewport: viewport, scale: scale,
                                rotation: rotation, offset: offset, pixelScale: pixelScale, aspectFit: aspectFit)
         guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
@@ -63,6 +39,40 @@ enum NanightScreenshot {
         let url = downloads.appendingPathComponent(filename)
         try png.write(to: url, options: .atomic)
         return url
+    }
+
+    static func captureFrame(model: NanightAppModel, requireFresh: Bool = false) async throws -> CGImage {
+        let buffer: CVPixelBuffer
+        if let player = model.player, let item = player.currentItem {
+            guard !requireFresh || player.timeControlStatus == .playing else {
+                throw NanightScreenshotError.imageUnavailable
+            }
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ])
+            item.add(output)
+            defer { item.remove(output) }
+            var frame: CVPixelBuffer?
+            for _ in 0..<20 {
+                try await Task.sleep(nanoseconds: 25_000_000)
+                guard player.currentItem === item else { throw NanightScreenshotError.imageUnavailable }
+                frame = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
+                if frame != nil { break }
+            }
+            guard let frame else { throw NanightScreenshotError.imageUnavailable }
+            buffer = frame
+        } else if let player = model.rtmpPlayer,
+                  !requireFresh || ProcessInfo.processInfo.systemUptime - player.screenshotFrameAt < 3,
+                  let frame = player.screenshotPixelBuffer {
+            buffer = frame
+        } else {
+            throw NanightScreenshotError.imageUnavailable
+        }
+        let source = CIImage(cvPixelBuffer: buffer)
+        guard let frame = CIContext().createCGImage(source, from: source.extent) else {
+            throw NanightScreenshotError.imageUnavailable
+        }
+        return frame
     }
 
     static func render(frame: CGImage, viewport: CGSize, scale: CGFloat, rotation: Double,

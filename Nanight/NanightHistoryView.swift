@@ -25,16 +25,9 @@ struct NanightHistoryView: View {
                 Spacer()
                 if compact { Button("View all history", action: openHistory).buttonStyle(.link) }
             }
-            HStack(spacing: 12) {
-                HStack(spacing: 5) {
-                    Capsule().fill(moon).frame(width: 2, height: 10)
-                    Text("Motion")
-                }
-                HStack(spacing: 5) {
-                    Circle().fill(moon).frame(width: 4, height: 4)
-                    Text("Sound")
-                }
-                Text("Shaded = observed").foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { activityLegend; restLegend }.fixedSize()
+                VStack(alignment: .leading, spacing: 4) { activityLegend; restLegend }
             }.font(.caption2)
             if let error = model.historyError ?? loadError {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -90,7 +83,23 @@ struct NanightHistoryView: View {
                             Spacer()
                             Text("\(Int(day.observedSeconds / 60)) min observed").foregroundStyle(.secondary)
                         }
-                        if day.events.isEmpty { Text("No activity markers recorded.").foregroundStyle(.secondary) }
+                        if !day.blocks.isEmpty {
+                            ScrollView {
+                                VStack(spacing: 6) {
+                                    ForEach(day.blocks) { block in
+                                        HStack {
+                                            Text(block.title).foregroundStyle(block.kind == "SLEEPING" ? Color.cyan : Color.mint)
+                                            Text(block.start, format: .dateTime.hour().minute())
+                                            Text("to")
+                                            Text(block.end, format: .dateTime.hour().minute())
+                                            Spacer()
+                                            Text(block.durationText).monospacedDigit()
+                                        }.help(block.tooltip)
+                                    }
+                                }
+                            }.frame(maxHeight: 90)
+                        }
+                        if day.events.isEmpty && day.blocks.isEmpty { Text("No activity markers recorded.").foregroundStyle(.secondary) }
                         ScrollView(showsIndicators: false) {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108, maximum: 128), spacing: 8)], alignment: .leading, spacing: 8) {
                                 ForEach(day.events) { event in
@@ -113,7 +122,7 @@ struct NanightHistoryView: View {
                         }.frame(maxHeight: 130)
                     }.font(.caption).padding(.top, 8)
                 }
-                Text(compact ? (earliest == nil ? "History starts as activity arrives." : "Gaps = not observed · Quiet ≠ asleep") : (earliest == nil ? "History begins as Nanight receives activity. Nothing is deleted automatically." : "Gaps are unobserved time. Quiet does not necessarily mean asleep."))
+                Text(compact ? (earliest == nil ? "History starts as activity arrives." : "Gaps = unobserved · Sleeping is an estimate") : (earliest == nil ? "History begins as Nanight receives activity. Nothing is deleted automatically." : "Gaps are unobserved time. Sleeping estimates use presence and low movement, not confirmed sleep."))
                     .font(.caption2).foregroundStyle(.secondary)
                 if !compact { Text("Stored on this Mac indefinitely. Times use your current time zone.").font(.caption2).foregroundStyle(.secondary) }
             }
@@ -121,9 +130,32 @@ struct NanightHistoryView: View {
         .padding(compact ? 14 : 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlayPreferenceValue(NanightHistoryHoverKey.self) { hover in
+            GeometryReader { geometry in
+                if let hover {
+                    NanightHistoryTooltip(text: hover.text, row: geometry[hover.bounds],
+                                          location: hover.location, available: geometry.size)
+                }
+            }.allowsHitTesting(false)
+        }
         .onAppear { if !compact { selected = model.selectedHistoryDay } }
         .onChange(of: model.selectedHistoryDay) { day in if !compact { selected = day } }
         .task(id: "\(camera ?? "")-\(model.historyRevision)") { await refresh() }
+    }
+
+    private var activityLegend: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 5) { Capsule().fill(moon).frame(width: 2, height: 10); Text("Motion") }
+            HStack(spacing: 5) { Circle().fill(moon).frame(width: 4, height: 4); Text("Sound") }
+        }
+    }
+
+    private var restLegend: some View {
+        HStack(spacing: 10) {
+            Label("In bed", systemImage: "rectangle.fill").foregroundStyle(.mint)
+            Label("Sleeping", systemImage: "rectangle.fill").foregroundStyle(.cyan)
+            Text("Shaded = observed").foregroundStyle(.secondary)
+        }
     }
 
     private var axis: some View {
@@ -195,6 +227,12 @@ private struct NanightDayTrack: View {
                 context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
                 context.fill(Path(rect), with: .color(moon.opacity(0.25)))
             }
+            for block in day.blocks {
+                let start = x(block.start), end = x(block.end)
+                let rect = CGRect(x: start, y: block.kind == "SLEEPING" ? size.height / 2 : 0,
+                                  width: max(2, end - start), height: size.height / 2)
+                context.fill(Path(rect), with: .color(block.kind == "SLEEPING" ? .cyan.opacity(0.8) : .mint.opacity(0.55)))
+            }
             for event in day.events {
                 let rect = CGRect(x: min(size.width - 2, x(event.timestamp)), y: event.kind == "MOTION" ? 3 : size.height / 2 - 2,
                                   width: event.kind == "MOTION" ? 2 : 4, height: event.kind == "MOTION" ? size.height - 6 : 4)
@@ -215,9 +253,12 @@ private struct NanightDayTrack: View {
                         .position(x: x, y: geometry.size.height / 2)
                     hoverLabel(timestamp.formatted(.dateTime.hour().minute().second()),
                                x: x, y: geometry.size.height + 12, width: geometry.size.width)
-                    if let event = hoveredEvent(at: hoverLocation, size: geometry.size) {
-                        hoverLabel("\(event.kind == "MOTION" ? "Motion" : "Sound") · \(event.timestamp.formatted(.dateTime.hour().minute().second()))",
-                                   x: x, y: -12, width: geometry.size.width, labelWidth: 140)
+                    Color.clear.anchorPreference(key: NanightHistoryHoverKey.self, value: .bounds) { bounds in
+                        let text = hoveredBlock(at: hoverLocation, size: geometry.size)?.tooltip
+                            ?? hoveredEvent(at: hoverLocation, size: geometry.size).map {
+                                "\($0.kind == "MOTION" ? "Motion" : "Sound") · \($0.timestamp.formatted(.dateTime.hour().minute().second()))"
+                            }
+                        return text.map { NanightHistoryHover(text: $0, bounds: bounds, location: hoverLocation) }
                     }
                 }
             }
@@ -247,6 +288,18 @@ private struct NanightDayTrack: View {
             .position(x: min(max(x, min(width, labelWidth) / 2), width - min(width, labelWidth) / 2), y: y)
     }
 
+    private func hoveredBlock(at location: CGPoint, size: CGSize) -> NanightStateBlock? {
+        guard size.width > 0 else { return nil }
+        let kind = location.y >= size.height / 2 ? "SLEEPING" : "IN_BED"
+        let duration = day.end.timeIntervalSince(day.date)
+        return day.blocks.first { block in
+            guard block.kind == kind else { return false }
+            let start = max(0, block.start.timeIntervalSince(day.date) / duration * size.width)
+            let end = min(size.width, block.end.timeIntervalSince(day.date) / duration * size.width)
+            return location.x >= start && location.x <= max(start + 2, end)
+        }
+    }
+
     private func hoveredEvent(at location: CGPoint, size: CGSize) -> NanightHistoryEvent? {
         let duration = day.end.timeIntervalSince(day.date)
         return day.events.compactMap { event -> (event: NanightHistoryEvent, distance: CGFloat)? in
@@ -258,4 +311,53 @@ private struct NanightDayTrack: View {
             return (event, hypot(location.x - rect.midX, location.y - rect.midY))
         }.min { $0.distance < $1.distance }?.event
     }
+}
+
+
+private struct NanightHistoryHover {
+    let text: String
+    let bounds: Anchor<CGRect>
+    let location: CGPoint
+}
+
+private struct NanightHistoryHoverKey: PreferenceKey {
+    static let defaultValue: NanightHistoryHover? = nil
+    static func reduce(value: inout NanightHistoryHover?, nextValue: () -> NanightHistoryHover?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Render outside the scrolling rows and keep the measured tooltip inside the panel.
+private struct NanightHistoryTooltip: View {
+    let text: String
+    let row: CGRect
+    let location: CGPoint
+    let available: CGSize
+    @State private var size: CGSize = .zero
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium)).monospacedDigit()
+            .foregroundStyle(.primary)
+            .padding(8)
+            .frame(width: min(300, max(0, available.width - 16)), alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: NanightTooltipSizeKey.self, value: geometry.size)
+                }
+            }
+            .onPreferenceChange(NanightTooltipSizeKey.self) { size = $0 }
+            .position(x: min(max(row.minX + location.x, size.width / 2 + 8),
+                             max(size.width / 2 + 8, available.width - size.width / 2 - 8)),
+                      y: row.minY >= size.height + 8 ? row.minY - size.height / 2 - 8
+                        : min(row.maxY + size.height / 2 + 8,
+                              max(size.height / 2 + 8, available.height - size.height / 2 - 8)))
+    }
+}
+
+private struct NanightTooltipSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }

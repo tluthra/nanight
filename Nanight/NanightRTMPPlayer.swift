@@ -148,8 +148,11 @@ final class NanightRTMPPlayer: ObservableObject {
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var videoFrameState: NanightVideoFrameState = .waitingForFrames
 
+    let babyPresence = NanightBabyPresence()
+
     private var view: PiPHKView?
     private(set) var screenshotPixelBuffer: CVPixelBuffer?
+    private(set) var screenshotFrameAt: TimeInterval = 0
     private var connection: RTMPConnection?
     private var stream: RTMPStream?
     private var audioRenderer: NanightAudioRenderer?
@@ -312,6 +315,7 @@ final class NanightRTMPPlayer: ObservableObject {
     }
 
     private func invalidatePlayback() -> NanightRTMPPlaybackSession {
+        babyPresence.suspend()
         playbackGeneration += 1
         automaticReconnectTask?.cancel()
         automaticReconnectTask = nil
@@ -476,6 +480,11 @@ final class NanightRTMPPlayer: ObservableObject {
         receivedFrameCount += 1
         let now = ProcessInfo.processInfo.systemUptime
         frameTracker.recordFrame(presentationTimeStamp: sample.presentationTimeStamp, at: now)
+        if let buffer = CMSampleBufferGetImageBuffer(sample) {
+            screenshotPixelBuffer = buffer
+            screenshotFrameAt = now
+            babyPresence.submit(buffer, at: now)
+        }
         if let layer = view?.layer as? AVSampleBufferDisplayLayer {
             if layer.status == .failed {
                 NanightLog.warning("Resetting video display: \(layer.error?.localizedDescription ?? "unknown error")")
@@ -484,7 +493,6 @@ final class NanightRTMPPlayer: ObservableObject {
             if layer.isReadyForMoreMediaData {
                 NanightVideoPresentation.displayImmediately(sample)
                 layer.enqueue(sample)
-                screenshotPixelBuffer = CMSampleBufferGetImageBuffer(sample)
                 presentedFrameCount += 1
             }
         }
@@ -500,6 +508,8 @@ final class NanightRTMPPlayer: ObservableObject {
         let displayFailed = (view?.layer as? AVSampleBufferDisplayLayer)?.status == .failed
         let inputState = frameTracker.state(at: now)
         let nextState: NanightVideoFrameState = transportFailed || displayFailed ? .stalled : inputState
+        if nextState != .live && videoFrameState == .live { babyPresence.suspend() }
+        babyPresence.expire(at: now)
 
         if nextState == .live {
             if videoFrameState != .live {

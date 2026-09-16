@@ -12,6 +12,7 @@ nonisolated struct NanightHistoryDay: Identifiable, Sendable {
     let end: Date
     var events: [NanightHistoryEvent] = []
     var observations: [DateInterval] = []
+    var blocks: [NanightStateBlock] = []
     var id: Date { date }
     var observedSeconds: TimeInterval { observations.reduce(0) { $0 + $1.duration } }
 }
@@ -22,6 +23,7 @@ actor NanightActivityStore {
     private var db: OpaquePointer?
     private var clearedBefore = -Double.infinity
     private var lastObservation: (camera: String, session: UUID, row: Int64, time: Date)?
+    private var analyses: [String: NanightSignalAnalysis] = [:]
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init(url: URL? = nil) {
@@ -52,6 +54,8 @@ actor NanightActivityStore {
             try execute("CREATE TABLE IF NOT EXISTS events (camera TEXT NOT NULL, time REAL NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(camera, time, kind)) WITHOUT ROWID")
             try execute("CREATE TABLE IF NOT EXISTS observations (id INTEGER PRIMARY KEY, camera TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL)")
             try execute("CREATE INDEX IF NOT EXISTS observations_camera_end ON observations(camera, end)")
+            try execute("CREATE TABLE IF NOT EXISTS signal_observations (id TEXT PRIMARY KEY, camera TEXT NOT NULL, time REAL NOT NULL, payload TEXT NOT NULL)")
+            try execute("CREATE INDEX IF NOT EXISTS signals_camera_time ON signal_observations(camera,time)")
         } catch {
             sqlite3_close(db)
             db = nil
@@ -128,12 +132,61 @@ actor NanightActivityStore {
         }
     }
 
+    /// Append evidence before interpreting it. Repeated IDs never overwrite raw data.
+    func recordSignal(camera: String, observation: NanightSignalObservation) throws -> NanightAnalysisStatus {
+        try open()
+        guard observation.timestamp.timeIntervalSince1970.isFinite,
+              observation.timestamp.timeIntervalSince1970 > clearedBefore else { return NanightAnalysisStatus() }
+        let payload = String(decoding: try JSONEncoder().encode(observation), as: UTF8.self)
+        try statement("INSERT OR IGNORE INTO signal_observations(id,camera,time,payload) VALUES(?,?,?,?)") { stmt in
+            bind(observation.id, to: stmt, at: 1)
+            bind(camera, to: stmt, at: 2)
+            sqlite3_bind_double(stmt, 3, observation.timestamp.timeIntervalSince1970)
+            bind(payload, to: stmt, at: 4)
+            try finish(stmt)
+        }
+        if sqlite3_changes(db) > 0, var cached = analyses[camera] {
+            if let last = cached.lastTimestamp, observation.timestamp < last {
+                analyses[camera] = nil
+            } else {
+                cached.consume(observation)
+                analyses[camera] = cached
+            }
+        }
+        return try analysis(camera: camera).status
+    }
+
+    func signals(camera: String) throws -> [NanightSignalObservation] {
+        try open()
+        var result: [NanightSignalObservation] = []
+        try statement("SELECT payload FROM signal_observations WHERE camera=? ORDER BY time,rowid") { stmt in
+            bind(camera, to: stmt, at: 1)
+            var status = sqlite3_step(stmt)
+            while status == SQLITE_ROW {
+                let payload = String(cString: sqlite3_column_text(stmt, 0))
+                result.append(try JSONDecoder().decode(NanightSignalObservation.self, from: Data(payload.utf8)))
+                status = sqlite3_step(stmt)
+            }
+            guard status == SQLITE_DONE else { throw failure() }
+        }
+        return result
+    }
+
+    private func analysis(camera: String) throws -> NanightSignalAnalysis {
+        if let cached = analyses[camera] { return cached }
+        var result = NanightSignalAnalysis()
+        for observation in try signals(camera: camera) { result.consume(observation) }
+        analyses[camera] = result
+        return result
+    }
+
     func clear(at date: Date = Date()) throws {
         try open()
         try execute("BEGIN IMMEDIATE")
         do {
             try execute("DELETE FROM events")
             try execute("DELETE FROM observations")
+            try execute("DELETE FROM signal_observations")
             try statement("INSERT OR REPLACE INTO metadata(key,value) VALUES('cleared_before',?)") { stmt in
                 sqlite3_bind_double(stmt, 1, date.timeIntervalSince1970)
                 try finish(stmt)
@@ -141,6 +194,7 @@ actor NanightActivityStore {
             try execute("COMMIT")
             clearedBefore = date.timeIntervalSince1970
             lastObservation = nil
+            analyses.removeAll()
         } catch {
             try? execute("ROLLBACK")
             throw error
@@ -150,9 +204,10 @@ actor NanightActivityStore {
     func earliestDate(camera: String) throws -> Date? {
         try open()
         var result: Date?
-        try statement("SELECT MIN(time) FROM (SELECT MIN(time) AS time FROM events WHERE camera=? UNION ALL SELECT MIN(start) AS time FROM observations WHERE camera=?)") { stmt in
+        try statement("SELECT MIN(time) FROM (SELECT MIN(time) AS time FROM events WHERE camera=? UNION ALL SELECT MIN(start) AS time FROM observations WHERE camera=? UNION ALL SELECT MIN(time) AS time FROM signal_observations WHERE camera=?)") { stmt in
             bind(camera, to: stmt, at: 1)
             bind(camera, to: stmt, at: 2)
+            bind(camera, to: stmt, at: 3)
             guard sqlite3_step(stmt) == SQLITE_ROW else { throw failure() }
             if sqlite3_column_type(stmt, 0) != SQLITE_NULL { result = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0)) }
         }
@@ -198,6 +253,11 @@ actor NanightActivityStore {
                 status = sqlite3_step(stmt)
             }
             guard status == SQLITE_DONE else { throw failure() }
+        }
+        for block in try analysis(camera: camera).blocks.values.sorted(by: { $0.start < $1.start }) {
+            for index in days.indices where block.end >= days[index].date && block.start < days[index].end {
+                days[index].blocks.append(block)
+            }
         }
         return days
     }

@@ -41,13 +41,10 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         self.statusItem = statusItem
 
         if let button = statusItem.button {
+            button.imagePosition = .imageOnly
             #if DEBUG
             statusItem.length = NSStatusItem.variableLength
-            button.imagePosition = .imageLeft
-            button.title = " 🐞"
             button.toolTip = "Nanight (Development)"
-            #else
-            button.imagePosition = .imageOnly
             #endif
             button.action = #selector(statusItemClicked(_:))
             button.target = self
@@ -68,6 +65,27 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
         installVideoGestureEventMonitor()
         NanightLog.gesture("BOOT revision=raw-events-v2 pid=\(ProcessInfo.processInfo.processIdentifier) app=\(Bundle.main.bundleURL.path)")
+        DispatchQueue.main.async { [weak self] in
+            self?.showCamera()
+        }
+    }
+
+    @MainActor
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showCamera()
+        return false
+    }
+
+    @MainActor
+    private func showCamera() {
+        if let popover, popover.isShown {
+            NSApp.activate(ignoringOtherApps: true)
+            popover.contentViewController?.view.window?.makeKey()
+            return
+        }
+
+        guard let button = statusItem?.button else { return }
+        togglePopover(from: button)
     }
 
     @MainActor
@@ -515,6 +533,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     private func showMenu(from sender: NSStatusBarButton) {
         let menu = NSMenu()
+        menu.showsStateColumn = false
         menu.addItem(NSMenuItem(title: model.activeCamera?.name ?? "Nanight", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Activity History", action: #selector(openHistory), keyEquivalent: ""))
@@ -523,7 +542,12 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         menu.addItem(updateItem)
         menu.addItem(NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: ""))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Nanight", action: #selector(quit), keyEquivalent: "q"))
+        let quitItem = NSMenuItem(title: "Quit Nanight", action: #selector(quit), keyEquivalent: "q")
+        quitItem.attributedTitle = NSAttributedString(
+            string: quitItem.title,
+            attributes: [.foregroundColor: NSColor.systemRed]
+        )
+        menu.addItem(quitItem)
 
         for item in menu.items {
             item.target = self
@@ -536,7 +560,8 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         statusItem?.menu = nil
     }
 
-    @objc
+    // Use an app-specific selector so macOS does not infer a Settings gear.
+    @objc(nanightOpenSettings)
     @MainActor
     func openSettings() {
         if settingsWindow == nil {
@@ -617,9 +642,26 @@ private extension NSEvent.EventType {
 
 private enum NanightMenuBarIconRenderer {
     static func image(for state: NanightMenuBarIconState) -> NSImage {
-        symbolImage(named: symbolName(for: state))
+        let icon = symbolImage(named: symbolName(for: state))
             ?? symbolImage(named: "moon")
             ?? NSImage(size: NSSize(width: 18, height: 18))
+        #if DEBUG
+        if let ladybug = symbolImage(named: "ladybug") {
+            let spacing: CGFloat = 5
+            let size = NSSize(width: icon.size.width + spacing + ladybug.size.width,
+                              height: max(icon.size.height, ladybug.size.height))
+            let image = NSImage(size: size, flipped: false) { _ in
+                icon.draw(in: NSRect(x: 0, y: (size.height - icon.size.height) / 2,
+                                     width: icon.size.width, height: icon.size.height))
+                ladybug.draw(in: NSRect(x: icon.size.width + spacing, y: (size.height - ladybug.size.height) / 2,
+                                        width: ladybug.size.width, height: ladybug.size.height))
+                return true
+            }
+            image.isTemplate = true
+            return image
+        }
+        #endif
+        return icon
     }
 
     private static func symbolName(for state: NanightMenuBarIconState) -> String {

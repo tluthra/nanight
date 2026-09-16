@@ -30,6 +30,7 @@ final class NanightAppModel: ObservableObject {
     @Published var cameraStatusText: String = "Not connected"
     @Published var streamStatusText: String = "Stream unavailable"
 
+    let timelapse = NanightTimelapse()
     let activityStore: NanightActivityStore
     @Published var historyRevision = 0
     @Published var historyError: String?
@@ -37,12 +38,15 @@ final class NanightAppModel: ObservableObject {
     @Published var activityExpanded = false
     @Published var activityPanelHeight: CGFloat = 240
     private var observationSession = UUID()
+    private var presenceCameraUID: String?
 
     func clearActivityHistory() async {
+        rtmpPlayer?.babyPresence.reset()
         observationSession = UUID()
         do {
             try await activityStore.clear()
             observationSession = UUID()
+            rtmpPlayer?.babyPresence.reset()
             historyRevision += 1
             historyError = nil
         } catch {
@@ -309,15 +313,6 @@ final class NanightAppModel: ObservableObject {
                 prepareStream()
             }
 
-            if wasOffline {
-                notifications.notify(
-                    kind: .reconnected,
-                    title: "Nanight reconnected",
-                    body: activeCamera?.name ?? "Nanit camera is reachable again.",
-                    cooldown: settings.notificationCooldownSeconds,
-                    notificationsEnabled: settings.notificationsEnabled && settings.notifyOnOffline
-                )
-            }
             wasOffline = false
             connectionState = .signedIn
         } catch {
@@ -328,6 +323,8 @@ final class NanightAppModel: ObservableObject {
     }
 
     func selectCamera(_ babyUID: String) {
+        timelapse.stop()
+        rtmpPlayer?.babyPresence.reset()
         NanightLog.info("Selecting camera \(babyUID)")
         settings.selectedBabyUID = babyUID
         resetMotionTimer()
@@ -484,6 +481,7 @@ final class NanightAppModel: ObservableObject {
     }
 
     func signOut() {
+        timelapse.stop()
         observationSession = UUID()
         activityExpanded = false
         NanightLog.info("Signing out")
@@ -651,6 +649,21 @@ final class NanightAppModel: ObservableObject {
             player = nil
             let playback = rtmpPlayer ?? NanightRTMPPlayer()
             rtmpPlayer = playback
+            if presenceCameraUID != camera.uid { playback.babyPresence.reset() }
+            presenceCameraUID = camera.uid
+            playback.babyPresence.onObservation = { [weak self] observation in
+                guard let self else { throw CancellationError() }
+                do {
+                    let status = try await self.activityStore.recordSignal(camera: camera.uid, observation: observation)
+                    self.historyRevision += 1
+                    self.historyError = nil
+                    return status
+                } catch {
+                    self.historyError = "Could not save numeric observations: \(error.localizedDescription)"
+                    throw error
+                }
+            }
+
             playback.resolveStreamURL = { [weak self] forceRefresh in
                 guard let self else { throw CancellationError() }
                 return try await self.playbackURL(for: camera.uid, forceRefresh: forceRefresh)
@@ -741,13 +754,6 @@ final class NanightAppModel: ObservableObject {
 
         if !wasOffline {
             NanightLog.warning("Marking app offline: \(message)")
-            notifications.notify(
-                kind: .offline,
-                title: "Nanight connection issue",
-                body: message,
-                cooldown: settings.notificationCooldownSeconds,
-                notificationsEnabled: settings.notificationsEnabled && settings.notifyOnOffline
-            )
         }
 
         wasOffline = true

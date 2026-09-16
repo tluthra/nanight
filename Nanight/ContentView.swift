@@ -194,6 +194,9 @@ private struct MonitorView: View {
                             HStack(spacing: 10) {
                                 ActivityIndicator(title: "Motion", systemName: "figure.walk", active: model.activity.motionActive, activeColor: .yellow)
                                 ActivityIndicator(title: "Sound", systemName: "waveform", active: model.activity.soundActive, activeColor: .orange)
+                                if let player = model.rtmpPlayer {
+                                    BabyPresenceIndicator(detector: player.babyPresence)
+                                }
                             }
                             .padding(.top, 3)
                         }
@@ -227,12 +230,10 @@ private struct MonitorView: View {
                                 action: model.toggleAudio
                             )
 
-                            OverlayButton(
-                                systemName: screenshotSaved ? "checkmark" : "camera.fill",
-                                help: screenshotSaved ? "Screenshot saved to Downloads" : "Save screenshot to Downloads",
-                                action: saveScreenshot
-                            )
-                            .disabled(isTakingScreenshot)
+                            TimelapseCameraControl(timelapse: model.timelapse, model: model,
+                                                   screenshotSaved: screenshotSaved,
+                                                   isTakingScreenshot: isTakingScreenshot,
+                                                   saveScreenshot: saveScreenshot)
                         }
 
                         Spacer()
@@ -314,6 +315,69 @@ private struct MonitorView: View {
             } catch {
                 screenshotError = error.localizedDescription
             }
+        }
+    }
+}
+
+private struct TimelapseCameraControl: View {
+    @ObservedObject var timelapse: NanightTimelapse
+    let model: NanightAppModel
+    let screenshotSaved: Bool
+    let isTakingScreenshot: Bool
+    let saveScreenshot: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if timelapse.state == .exporting {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 30, height: 30)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .help("Creating timelapse video…")
+                    .accessibilityLabel("Creating timelapse video")
+            } else {
+                OverlayButton(
+                    systemName: timelapse.state == .recording ? "timelapse" :
+                        (timelapse.state == .saved || screenshotSaved ? "checkmark" : "camera.fill"),
+                    help: timelapse.state == .recording ? "Stop timelapse and create video" :
+                        (timelapse.state == .saved ? "Timelapse saved to Downloads" : "Save screenshot to Downloads"),
+                    foregroundColor: timelapse.state == .recording ? .red : .white,
+                    action: {
+                        if timelapse.state == .recording { timelapse.stop() }
+                        else { saveScreenshot() }
+                    }
+                )
+                .disabled(isTakingScreenshot)
+                .contextMenu {
+                    if timelapse.state == .idle || timelapse.state == .saved {
+                        Button("Start Timelapse") { timelapse.start(model: model) }
+                    }
+                }
+            }
+            if hovering && timelapse.state == .idle {
+                OverlayButton(
+                    systemName: "timelapse",
+                    help: "Start timelapse: capture a photo every 5 seconds",
+                    action: { timelapse.start(model: model) }
+                )
+                .accessibilityLabel("Start timelapse")
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .padding(.trailing, 2)
+        .contentShape(Rectangle())
+        .clipped()
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hovering)
+        .alert("Timelapse", isPresented: Binding(
+            get: { timelapse.errorMessage != nil },
+            set: { if !$0 { timelapse.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { timelapse.errorMessage = nil }
+        } message: {
+            Text(timelapse.errorMessage ?? "")
         }
     }
 }
@@ -602,7 +666,6 @@ struct SettingsView: View {
                 ))
                 Toggle("Motion", isOn: $model.settings.notifyOnMotion)
                 Toggle("Sound", isOn: $model.settings.notifyOnSound)
-                Toggle("Offline", isOn: $model.settings.notifyOnOffline)
 
                 HStack {
                     Text("Notification cooldown")
@@ -682,5 +745,19 @@ struct SettingsView: View {
         .tint(.accentColor)
         .padding()
         .frame(width: 520, height: 620)
+    }
+}
+
+private struct BabyPresenceIndicator: View {
+    @ObservedObject var detector: NanightBabyPresence
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ActivityIndicator(title: "In bed", systemName: "figure.child", active: detector.possibleBaby, activeColor: .mint)
+                .help("Local baby-presence estimate. Brief missed detections are smoothed.")
+            ActivityIndicator(title: "Sleeping", systemName: "moon.zzz.fill", active: detector.likelySleeping, activeColor: .cyan)
+                .help("Estimated from presence and sustained low image movement. Faded means sleep is unconfirmed, not necessarily awake.")
+                .accessibilityLabel("Sleeping: \(detector.likelySleeping ? "likely asleep" : "unconfirmed")")
+        }
     }
 }
