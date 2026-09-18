@@ -6,6 +6,20 @@
         <description>Stable releases of Nanight for macOS.</description>
         <language>en</language>
         <item>
+            <title>0.0.8</title>
+            <pubDate>Thu, 17 Sep 2026 22:12:30 -0700</pubDate>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[Fixes and improvements
+
+- Fix dragging the pinned camera window.
+- Prevent recursive popover resizing when rotating the camera.
+- Click Motion, Sound, In bed, or Sleeping in the activity legend to show or hide that track.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.8/Nanight.zip" length="71169968" type="application/octet-stream" sparkle:edSignature="Y0kLCSWatLg+0z9P7jHKlEyJUuNVfWffgzDQnxp9zDlds6B7f8upe1Uw4Ad9IVxJHqxFCKwQ9iEegsiGo7ywBg=="/>
+        </item>
+        <item>
             <title>0.0.7</title>
             <pubDate>Wed, 16 Sep 2026 10:47:10 -0700</pubDate>
             <sparkle:version>10</sparkle:version>
@@ -24,16 +38,6 @@
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="plain-text"><![CDATA[The screenshot button now sits beside the audio control for easier access. Development builds also show a distinct menu-bar indicator.]]></description>
             <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.6/Nanight.zip" length="4599297" type="application/octet-stream" sparkle:edSignature="Zsfyzoao5Qng+38rXu8vQhpNEW/e5CdV1Xz85RW1VSyLDG5l5bUscEDiwzJUomq0P6AfZWaTGApnIaoI1ps3Dw=="/>
-        </item>
-        <item>
-            <title>0.0.5</title>
-            <pubDate>Mon, 14 Sep 2026 11:54:27 -0700</pubDate>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>0.0.5</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="plain-text"><![CDATA[Nanight now checks for updates automatically when enabled. Use Check for Updates from the menu or Settings, and choose Install and Relaunch when ready. Includes activity history and release build fixes.]]></description>
-            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.5/Nanight.zip" length="4599495" type="application/octet-stream" sparkle:edSignature="bKCzcEa722a3Yc8S8TOoDVNO0ljF4WZa3MKeDFyl4N+UV1zwnxoNR19H5FXZofQi7cL9/wuaZiniWWrY6ZqTCw=="/>
         </item>
     </channel>
 </rss>
