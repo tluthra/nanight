@@ -10,6 +10,7 @@ struct NanightHistoryView: View {
     @State private var loadedCamera: String?
     @State private var loading = false
     @State private var loadError: String?
+    @State private var hiddenKinds: Set<String> = []
     @Environment(\.colorScheme) private var scheme
 
     private var camera: String? { model.activeCamera?.uid }
@@ -54,7 +55,7 @@ struct NanightHistoryView: View {
                                         Text(Calendar.current.isDateInToday(day.date) ? "Today" : day.date.formatted(.dateTime.weekday(.abbreviated)))
                                             .font(.caption2).foregroundStyle(.secondary)
                                     }.frame(width: 55, alignment: .leading)
-                                    NanightDayTrack(day: day, moon: moon)
+                                    NanightDayTrack(day: day, moon: moon, hiddenKinds: hiddenKinds)
                                         .frame(height: compact ? 22 : 28)
                                     Text("\(day.events.filter { $0.kind == "MOTION" }.count)")
                                         .monospacedDigit().frame(width: 32, alignment: .trailing)
@@ -145,17 +146,41 @@ struct NanightHistoryView: View {
 
     private var activityLegend: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 5) { Capsule().fill(moon).frame(width: 2, height: 10); Text("Motion") }
-            HStack(spacing: 5) { Circle().fill(moon).frame(width: 4, height: 4); Text("Sound") }
+            legendButton("Motion", kind: "MOTION") {
+                HStack(spacing: 5) { Capsule().fill(moon).frame(width: 2, height: 10); Text("Motion") }
+            }
+            legendButton("Sound", kind: "SOUND") {
+                HStack(spacing: 5) { Circle().fill(moon).frame(width: 4, height: 4); Text("Sound") }
+            }
         }
     }
 
     private var restLegend: some View {
         HStack(spacing: 10) {
-            Label("In bed", systemImage: "rectangle.fill").foregroundStyle(.mint)
-            Label("Sleeping", systemImage: "rectangle.fill").foregroundStyle(.cyan)
+            legendButton("In bed", kind: "IN_BED") {
+                Label("In bed", systemImage: "rectangle.fill").foregroundStyle(.mint)
+            }
+            legendButton("Sleeping", kind: "SLEEPING") {
+                Label("Sleeping", systemImage: "rectangle.fill").foregroundStyle(.cyan)
+            }
             Text("Shaded = observed").foregroundStyle(.secondary)
         }
+    }
+
+    private func legendButton<Content: View>(_ title: String, kind: String, @ViewBuilder label: () -> Content) -> some View {
+        let isVisible = !hiddenKinds.contains(kind)
+        return Button {
+            if isVisible { hiddenKinds.insert(kind) }
+            else { hiddenKinds.remove(kind) }
+        } label: {
+            label()
+                .opacity(isVisible ? 1 : 0.35)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(isVisible ? "Hide" : "Show") \(title.lowercased()) in activity bars")
+        .accessibilityLabel(title)
+        .accessibilityValue(isVisible ? "Shown" : "Hidden")
     }
 
     private var axis: some View {
@@ -205,7 +230,11 @@ struct NanightHistoryView: View {
 private struct NanightDayTrack: View {
     let day: NanightHistoryDay
     let moon: Color
+    let hiddenKinds: Set<String>
     @State private var hoverLocation: CGPoint?
+
+    private var visibleBlocks: [NanightStateBlock] { day.blocks.filter { !hiddenKinds.contains($0.kind) } }
+    private var visibleEvents: [NanightHistoryEvent] { day.events.filter { !hiddenKinds.contains($0.kind) } }
 
     var body: some View {
         Canvas { context, size in
@@ -227,13 +256,13 @@ private struct NanightDayTrack: View {
                 context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor)))
                 context.fill(Path(rect), with: .color(moon.opacity(0.25)))
             }
-            for block in day.blocks {
+            for block in visibleBlocks {
                 let start = x(block.start), end = x(block.end)
                 let rect = CGRect(x: start, y: block.kind == "SLEEPING" ? size.height / 2 : 0,
                                   width: max(2, end - start), height: size.height / 2)
                 context.fill(Path(rect), with: .color(block.kind == "SLEEPING" ? .cyan.opacity(0.8) : .mint.opacity(0.55)))
             }
-            for event in day.events {
+            for event in visibleEvents {
                 let rect = CGRect(x: min(size.width - 2, x(event.timestamp)), y: event.kind == "MOTION" ? 3 : size.height / 2 - 2,
                                   width: event.kind == "MOTION" ? 2 : 4, height: event.kind == "MOTION" ? size.height - 6 : 4)
                 context.fill(event.kind == "MOTION" ? Path(rect) : Path(ellipseIn: rect), with: .color(moon))
@@ -292,7 +321,7 @@ private struct NanightDayTrack: View {
         guard size.width > 0 else { return nil }
         let kind = location.y >= size.height / 2 ? "SLEEPING" : "IN_BED"
         let duration = day.end.timeIntervalSince(day.date)
-        return day.blocks.first { block in
+        return visibleBlocks.first { block in
             guard block.kind == kind else { return false }
             let start = max(0, block.start.timeIntervalSince(day.date) / duration * size.width)
             let end = min(size.width, block.end.timeIntervalSince(day.date) / duration * size.width)
@@ -302,7 +331,7 @@ private struct NanightDayTrack: View {
 
     private func hoveredEvent(at location: CGPoint, size: CGSize) -> NanightHistoryEvent? {
         let duration = day.end.timeIntervalSince(day.date)
-        return day.events.compactMap { event -> (event: NanightHistoryEvent, distance: CGFloat)? in
+        return visibleEvents.compactMap { event -> (event: NanightHistoryEvent, distance: CGFloat)? in
             let x = min(size.width - 2, max(0, event.timestamp.timeIntervalSince(day.date) / duration * size.width))
             let isMotion = event.kind == "MOTION"
             let rect = CGRect(x: x, y: isMotion ? 3 : size.height / 2 - 2,

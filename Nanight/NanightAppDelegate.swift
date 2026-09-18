@@ -601,7 +601,13 @@ final class NanightCameraHostingController<Content: View>: NSViewController {
         super.init(nibName: nil, bundle: nil)
         let host = NSHostingView(rootView: rootView)
         host.sizingOptions = []
-        view = host
+        // Keep SwiftUI out of the window-content role. Even with sizingOptions
+        // disabled, animated rotation can make a root host recursively resize
+        // the popover from windowDidLayout until the main thread overflows.
+        let container = NSView(frame: host.frame)
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        view = container
     }
 
     @available(*, unavailable)
