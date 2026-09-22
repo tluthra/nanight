@@ -6,6 +6,23 @@
         <description>Stable releases of Nanight for macOS.</description>
         <language>en</language>
         <item>
+            <title>0.0.9</title>
+            <pubDate>Mon, 21 Sep 2026 23:03:37 -0700</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>0.0.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[Reduces background compute and fixes memory growth during long sessions.
+
+- Runs local baby-presence classification every 10 seconds instead of 3, reducing scheduled CLIP work and observation writes by 70%. Lightweight motion checks still run every 3 seconds and preserve activity between classifications.
+- Updates presence freshness, confirmation, and sleep-history timing for the slower cadence, while preserving the interpretation of older history.
+- Fixes completed temperature and humidity WebSocket connections accumulating in memory, with bounded timeouts and cleanup on success, failure, or cancellation.
+- Disables code-coverage instrumentation in distributable builds.
+
+Developer ID signed and notarized by Apple. Validated with 107 app tests and 11 release-validation tests.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.9/Nanight.zip" length="70718877" type="application/octet-stream" sparkle:edSignature="cSqu4nlXUNgSltAh73cbNL5a08WjaFU4ChU/yDatwdSyhQIPRK5YqUfmAq+3zOoueXyvAdmsQK9nrZzCEwQQAw=="/>
+        </item>
+        <item>
             <title>0.0.8</title>
             <pubDate>Thu, 17 Sep 2026 22:12:30 -0700</pubDate>
             <sparkle:version>11</sparkle:version>
@@ -28,16 +45,6 @@
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="plain-text"><![CDATA[Adds local baby-presence detection, estimated sleep and activity history, and timelapse support. Presence and sleep indicators are estimates processed on your Mac.]]></description>
             <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.7/Nanight.zip" length="71148680" type="application/octet-stream" sparkle:edSignature="5S1LyuMbfLK2zz7eD4k60NI2oQd1UaJDnX71zzodIaasSsqBSSwQZPnm1Gp1w1gpDxalwLV4rMztyUuihinXCA=="/>
-        </item>
-        <item>
-            <title>0.0.6</title>
-            <pubDate>Mon, 14 Sep 2026 12:43:05 -0700</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>0.0.6</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="plain-text"><![CDATA[The screenshot button now sits beside the audio control for easier access. Development builds also show a distinct menu-bar indicator.]]></description>
-            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.6/Nanight.zip" length="4599297" type="application/octet-stream" sparkle:edSignature="Zsfyzoao5Qng+38rXu8vQhpNEW/e5CdV1Xz85RW1VSyLDG5l5bUscEDiwzJUomq0P6AfZWaTGApnIaoI1ps3Dw=="/>
         </item>
     </channel>
 </rss>
