@@ -167,4 +167,102 @@ struct SignalAnalysisTests {
         #expect(sleep.first?.inferredIntervals.isEmpty == false)
     }
 
+    private func slowSample(_ seconds: Double, session: UUID, fraction: Float = 0) -> NanightSignalObservation {
+        var observation = sample(seconds, session: session, fraction: fraction)
+        observation.extractorVersion = 2
+        return observation
+    }
+
+    @Test func tenSecondSamplesConfirmPresenceAndSleepWithoutFalseInterruptions() {
+        let session = UUID()
+        var analysis = NanightSignalAnalysis()
+        analysis.consume(slowSample(0, session: session))
+        #expect(!analysis.status.inBed)
+        analysis.consume(slowSample(1, session: session))
+        #expect(!analysis.status.inBed) // Two near-identical frames are not ten seconds of evidence.
+        analysis.consume(slowSample(10, session: session))
+        #expect(analysis.status.inBed)
+        for t in stride(from: 20, through: 120, by: 10) { analysis.consume(slowSample(Double(t), session: session)) }
+        #expect(!analysis.status.sleeping)
+        analysis.consume(slowSample(130, session: session))
+        #expect(analysis.status.sleeping)
+        #expect(analysis.blocks.count == 2)
+        for t in stride(from: 140, through: 170, by: 10) {
+            analysis.consume(slowSample(Double(t), session: session, fraction: 0.2))
+        }
+        #expect(!analysis.status.sleeping)
+        #expect(analysis.status.inBed)
+    }
+
+    @Test func slowerSamplingStillRejectsMissingEvidenceAndConfirmsAbsenceByElapsedTime() {
+        let session = UUID()
+        var analysis = NanightSignalAnalysis()
+        for t in stride(from: 0, through: 130, by: 10) { analysis.consume(slowSample(Double(t), session: session)) }
+        #expect(analysis.status.sleeping)
+        analysis.consume(slowSample(146, session: session))
+        #expect(!analysis.status.sleeping) // More than fifteen seconds without evidence.
+        #expect(analysis.status.inBed)
+        for t in stride(from: 156, through: 276, by: 10) {
+            var observation = slowSample(Double(t), session: session)
+            observation.babySimilarity = 0.1; observation.emptySimilarity = 0.3
+            analysis.consume(observation)
+        }
+        #expect(!analysis.status.inBed)
+        #expect(!analysis.status.sleeping)
+    }
+
+    @Test func invalidMotionWindowCannotBuildSleepEvidence() {
+        let session = UUID()
+        var analysis = NanightSignalAnalysis()
+        for t in stride(from: 0, through: 180, by: 10) {
+            var observation = slowSample(Double(t), session: session)
+            observation.motionValid = false
+            analysis.consume(observation)
+        }
+        #expect(analysis.status.inBed)
+        #expect(!analysis.status.sleeping)
+    }
+
+    @Test func versionOneHistoryKeepsItsOriginalFreshnessRule() {
+        let session = UUID()
+        var legacy = NanightSignalAnalysis(), current = NanightSignalAnalysis()
+        for t in stride(from: 0, through: 150, by: 10) {
+            legacy.consume(sample(Double(t), session: session))
+            current.consume(slowSample(Double(t), session: session))
+        }
+        #expect(!legacy.status.inBed)
+        #expect(!legacy.status.sleeping)
+        #expect(current.status.inBed)
+        #expect(current.status.sleeping)
+    }
+
+    @Test func tenSecondGapInferenceReplaysFromSavedVersionedEvidence() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("test.sqlite")
+        let store = NanightActivityStore(url: url), session = UUID()
+        var direct = NanightSignalAnalysis()
+        for t in Array(stride(from: 0, through: 60, by: 10)) + Array(stride(from: 3600, through: 3900, by: 10)) {
+            var observation = slowSample(Double(t), session: session)
+            if t == 3600 {
+                observation.motionValid = false
+                observation.changedFraction = nil; observation.brightnessChange = nil
+            }
+            direct.consume(observation)
+            let status = try await store.recordSignal(camera: "one", observation: observation)
+            #expect(status.inBed == direct.status.inBed)
+            #expect(status.sleeping == direct.status.sleeping)
+        }
+        let reopened = NanightActivityStore(url: url)
+        let saved = try await reopened.signals(camera: "one")
+        #expect(saved.count == 38)
+        #expect(saved.allSatisfy { $0.extractorVersion == 2 })
+        var replay = NanightSignalAnalysis()
+        saved.forEach { replay.consume($0) }
+        #expect(replay.status.sleeping)
+        #expect(replay.blocks.count == 2)
+        #expect(replay.blocks.values.allSatisfy { !$0.inferredIntervals.isEmpty })
+        #expect(replay.blocks.mapValues(\.tooltip) == direct.blocks.mapValues(\.tooltip))
+    }
+
 }

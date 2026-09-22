@@ -1,5 +1,13 @@
 import Foundation
 
+nonisolated enum NanightAnalysisTiming {
+    static let presenceInterval: TimeInterval = 10
+    static let presenceFreshness: TimeInterval = 15
+    static let motionInterval: TimeInterval = 3
+    static let motionFreshness: TimeInterval = 8
+    static let inferenceDeadline: TimeInterval = 8
+}
+
 /// Persisted numeric evidence only. Changing interpretation never changes these rows.
 nonisolated struct NanightSignalObservation: Codable, Sendable, Identifiable {
     enum Kind: String, Codable { case sample, interruption, reset, failure }
@@ -24,7 +32,7 @@ nonisolated struct NanightAnalysisStatus: Sendable {
 
 /// One reducer for both live observations and replay from SQLite.
 nonisolated struct NanightSignalAnalysis {
-    static let version = 2
+    static let version = 3
     private var rest = NanightRestState()
     private var session: UUID?
     private(set) var status = NanightAnalysisStatus()
@@ -45,7 +53,7 @@ nonisolated struct NanightSignalAnalysis {
             status = NanightAnalysisStatus()
             return
         }
-        guard observation.extractorVersion == 1, observation.model == "MobileCLIP-S2",
+        guard [1, 2].contains(observation.extractorVersion), observation.model == "MobileCLIP-S2",
               let baby = observation.babySimilarity, let empty = observation.emptySimilarity,
               baby.isFinite, empty.isFinite else {
             rest.interrupt(); gapInference.boundary(reset: true)
@@ -60,9 +68,16 @@ nonisolated struct NanightSignalAnalysis {
            brightness < 0.15 {
             moving = fraction > 0.04
         }
-        let emitted = rest.record(presence: presence, moving: moving, at: observation.timestamp)
+        // Version 1 stored one frame's motion every three seconds. Version 2
+        // stores the entire motion window with each ten-second classification.
+        let sampleGap = observation.extractorVersion == 2
+            ? NanightAnalysisTiming.presenceFreshness : NanightAnalysisTiming.motionFreshness
+        let confirmationDuration = observation.extractorVersion == 2 ? NanightAnalysisTiming.presenceInterval : 0
+        let emitted = rest.record(presence: presence, moving: moving, at: observation.timestamp,
+                                  maximumSampleGap: sampleGap, minimumConfirmationDuration: confirmationDuration)
         gapInference.record(at: observation.timestamp, presence: presence, moving: moving, emitted: emitted,
-                            baselineMissing: observation.changedFraction == nil && observation.brightnessChange == nil)
+                            baselineMissing: observation.changedFraction == nil && observation.brightnessChange == nil,
+                            maximumSampleGap: sampleGap)
         status = NanightAnalysisStatus(inBed: rest.inBed != nil, sleeping: rest.sleeping != nil)
     }
 }

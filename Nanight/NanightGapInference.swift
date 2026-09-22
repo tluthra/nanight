@@ -29,7 +29,8 @@ nonisolated struct NanightGapInference {
     }
 
     mutating func record(at time: Date, presence: NanightPresenceObservation, moving: Bool?,
-                         emitted: [NanightStateBlock], baselineMissing: Bool = false) {
+                         emitted: [NanightStateBlock], baselineMissing: Bool = false,
+                         maximumSampleGap: TimeInterval = NanightAnalysisTiming.motionFreshness) {
         if let lastTime, time.timeIntervalSince(lastTime) > NanightRestState.interruptionGrace {
             pending = nil
             if let bed = lastBed, bed.duration >= 30,
@@ -38,7 +39,7 @@ nonisolated struct NanightGapInference {
                 pending = Bridge(bed: bed, sleep: lastSleep, quietStart: quietStart, before: lastTime, after: time)
             }
             quietSince = nil
-        } else if let lastTime, time.timeIntervalSince(lastTime) > 8 {
+        } else if let lastTime, time.timeIntervalSince(lastTime) > maximumSampleGap {
             quietSince = nil; lastQuietTime = nil; pending = nil
         }
         if presence != .present { pending = nil }
@@ -46,7 +47,7 @@ nonisolated struct NanightGapInference {
             if quietSince == nil { quietSince = time }
             lastQuietTime = time
         } else if !(presence == .present && moving == nil && baselineMissing
-                    && lastQuietTime.map { time.timeIntervalSince($0) <= 8 } == true) {
+                    && lastQuietTime.map { time.timeIntervalSince($0) <= maximumSampleGap } == true) {
             quietSince = nil; lastQuietTime = nil
         }
 
@@ -59,7 +60,7 @@ nonisolated struct NanightGapInference {
                 bridge.joinedBed = true
             }
             if bridge.joinedBed, let sleep, let quietStart = bridge.quietStart,
-               let resumedQuiet = quietSince, resumedQuiet.timeIntervalSince(bridge.after) <= 8,
+               let resumedQuiet = quietSince, resumedQuiet.timeIntervalSince(bridge.after) <= maximumSampleGap,
                time.timeIntervalSince(resumedQuiet) >= 120 {
                 let previous = bridge.sleep ?? NanightStateBlock(
                     id: "SLEEPING-inferred-\(quietStart.timeIntervalSince1970)", kind: "SLEEPING",

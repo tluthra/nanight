@@ -28,4 +28,21 @@ import Testing
         #expect(await motion.measure(base, at: 12, session: 2).valid == false)
         #expect(await motion.measure(base, at: 30, session: 2).valid == false)
     }
+
+    @Test func motionWindowKeepsPeaksAndNeverTurnsInvalidSamplesIntoQuiet() {
+        var window = NanightMotionWindow()
+        window.append(NanightMotionMeasurement(changedFraction: 0.2, brightnessChange: 0.01, valid: true), at: 3)
+        window.append(NanightMotionMeasurement(changedFraction: 0, brightnessChange: 0.2, valid: true), at: 6)
+        window.append(NanightMotionMeasurement(changedFraction: 0, brightnessChange: 0, valid: true), at: 9)
+        let peaks = window.take(at: 10)
+        #expect(peaks.changedFraction == 0.2)
+        #expect(peaks.brightnessChange == 0.2)
+        #expect(peaks.valid)
+        #expect(!window.take(at: 11).valid)
+        window.append(NanightMotionMeasurement(), at: 12)
+        window.append(NanightMotionMeasurement(changedFraction: 0, brightnessChange: 0, valid: true), at: 15)
+        #expect(!window.take(at: 20).valid)
+        window.append(NanightMotionMeasurement(changedFraction: 0, brightnessChange: 0, valid: true), at: 21)
+        #expect(!window.take(at: 30).valid)
+    }
 }

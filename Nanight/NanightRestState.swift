@@ -45,11 +45,13 @@ nonisolated struct NanightRestState {
         if inBed == nil { candidate = nil; matches = 0 }
     }
 
-    mutating func record(presence: NanightPresenceObservation, moving: Bool?, at time: Date) -> [NanightStateBlock] {
+    mutating func record(presence: NanightPresenceObservation, moving: Bool?, at time: Date,
+                         maximumSampleGap: TimeInterval = NanightAnalysisTiming.motionFreshness,
+                         minimumConfirmationDuration: TimeInterval = 0) -> [NanightStateBlock] {
         if let lastSample {
             let gap = time.timeIntervalSince(lastSample)
             if gap < 0 || gap > Self.interruptionGrace { self = Self() }
-            else if gap > 8 { interrupt() }
+            else if gap > maximumSampleGap { interrupt() }
         }
         lastSample = time
         if presence != .present {
@@ -81,7 +83,7 @@ nonisolated struct NanightRestState {
         lastPositive = time
         if candidate == nil { candidate = time }
         matches += 1
-        if inBed == nil, matches >= 2 {
+        if inBed == nil, matches >= 2, time.timeIntervalSince(candidate ?? time) >= minimumConfirmationDuration {
             inBed = NanightStateBlock(id: "IN_BED-\((candidate ?? time).timeIntervalSince1970)", kind: "IN_BED", start: candidate ?? time, end: time)
         }
         guard inBed != nil else { return [] }

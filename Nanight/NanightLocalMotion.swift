@@ -10,6 +10,31 @@ nonisolated struct NanightMotionMeasurement: Sendable {
     var valid = false
 }
 
+/// Preserve any motion or exposure change between CLIP checks. A missing or
+/// invalid measurement makes the window unknown, never evidence of quiet.
+nonisolated struct NanightMotionWindow {
+    private var measurement = NanightMotionMeasurement(valid: true)
+    private var latestTime: TimeInterval?
+
+    mutating func append(_ value: NanightMotionMeasurement, at time: TimeInterval) {
+        measurement.valid = measurement.valid && value.valid
+        if let fraction = value.changedFraction, fraction.isFinite {
+            measurement.changedFraction = max(measurement.changedFraction ?? 0, fraction)
+        } else { measurement.valid = false }
+        if let brightness = value.brightnessChange, brightness.isFinite {
+            measurement.brightnessChange = max(measurement.brightnessChange ?? 0, brightness)
+        } else { measurement.valid = false }
+        latestTime = time
+    }
+
+    mutating func take(at time: TimeInterval) -> NanightMotionMeasurement {
+        defer { self = Self() }
+        guard let latestTime, time >= latestTime,
+              time - latestTime <= NanightAnalysisTiming.motionFreshness else { return NanightMotionMeasurement() }
+        return measurement
+    }
+}
+
 actor NanightLocalMotion {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var previous: [Float]?
@@ -38,7 +63,7 @@ actor NanightLocalMotion {
         }
         defer { previous = gray; previousTime = time; previousSession = session }
         guard let previous, let previousTime, previousSession == session,
-              time > previousTime, time - previousTime <= 8 else { return NanightMotionMeasurement() }
+              time > previousTime, time - previousTime <= NanightAnalysisTiming.motionFreshness else { return NanightMotionMeasurement() }
         let mean = gray.reduce(0, +) / Float(gray.count)
         let oldMean = previous.reduce(0, +) / Float(previous.count)
         let changed = zip(gray, previous).filter { abs(($0 - mean) - ($1 - oldMean)) > 0.07 }.count

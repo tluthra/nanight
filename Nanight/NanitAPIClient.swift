@@ -60,10 +60,16 @@ final class NanitAPIClient {
 
     private let session: URLSession
     private let baseURL: URL
+    private let climateSocketFactory: (URLRequest) throws -> NanitClimateSocket
+    private let climateTimeout: Duration
 
-    init(session: URLSession = .shared, baseURL: URL = NanitAPIClient.defaultBaseURL) {
+    init(session: URLSession = .shared, baseURL: URL = NanitAPIClient.defaultBaseURL,
+         climateSocketFactory: @escaping (URLRequest) throws -> NanitClimateSocket = { try NanitClimateSocket(request: $0) },
+         climateTimeout: Duration = .seconds(15)) {
         self.session = session
         self.baseURL = baseURL
+        self.climateSocketFactory = climateSocketFactory
+        self.climateTimeout = climateTimeout
     }
 
     func login(email: String, password: String) async throws -> NanitTokens {
@@ -170,7 +176,9 @@ final class NanitAPIClient {
     }
 
     func cloudWebSocketURL(cameraUID: String) -> URL? {
-        URL(string: "wss://api.nanit.com/focus/cameras/\(cameraUID)/user_connect")
+        var components = URLComponents(url: apiURL(path: "/focus/cameras/\(cameraUID)/user_connect"), resolvingAgainstBaseURL: false)
+        components?.scheme = baseURL.scheme == "http" ? "ws" : "wss"
+        return components?.url
     }
 
     func localWebSocketURL(cameraIP: String) -> URL? {
@@ -178,46 +186,57 @@ final class NanitAPIClient {
     }
 
     func climate(accessToken: String, cameraUID: String) async throws -> NanitClimateReading? {
+        try Task.checkCancellation()
         guard let url = cloudWebSocketURL(cameraUID: cameraUID) else {
             throw NanitAPIError.invalidResponse
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 15
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(
             "Nanit/767 CFNetwork/1498.700.2 Darwin/23.6.0",
             forHTTPHeaderField: "User-Agent"
         )
 
-        let socket = session.webSocketTask(with: request)
-        socket.resume()
-        defer {
-            socket.cancel(with: .normalClosure, reason: nil)
+        let socket = try climateSocketFactory(request)
+        defer { socket.close() }
+
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            socket.start()
+            return try await withThrowingTaskGroup(of: NanitClimateReading?.self) { group in
+                defer { group.cancelAll() }
+                group.addTask { @MainActor in
+                    try Task.checkCancellation()
+                    let requestID = Int32.random(in: 1...Int32.max)
+                    let payload = NanitSensorWebSocketCodec.sensorDataRequest(requestID: requestID)
+                    try await socket.send(payload)
+                    var messages = socket.messages.makeAsyncIterator()
+                    for _ in 0..<6 {
+                        guard let message = try await messages.next() else { throw NanitAPIError.invalidResponse }
+                        guard let data = message else { continue }
+                        if let reading = try NanitSensorWebSocketCodec.climateReading(
+                            from: data, matchingRequestID: requestID
+                        ) {
+                            return reading
+                        }
+                    }
+                    return nil
+                }
+                let timeout = climateTimeout
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    // Unblock network I/O before the task group waits for its children.
+                    socket.close()
+                    throw NanitAPIError.transport("Nanit WebSocket request timed out.")
+                }
+                guard let result = try await group.next() else { throw NanitAPIError.invalidResponse }
+                try Task.checkCancellation()
+                return result
+            }
+        } onCancel: {
+            socket.close()
         }
-
-        let requestID = Int32.random(in: 1...Int32.max)
-        let payload = NanitSensorWebSocketCodec.sensorDataRequest(requestID: requestID)
-        try await socket.send(.data(payload))
-
-        for _ in 0..<6 {
-            let message = try await Self.withTimeout(seconds: 12) {
-                try await socket.receive()
-            }
-
-            guard case .data(let data) = message else {
-                continue
-            }
-
-            if let reading = try NanitSensorWebSocketCodec.climateReading(
-                from: data,
-                matchingRequestID: requestID
-            ) {
-                return reading
-            }
-        }
-
-        return nil
     }
 
     private func authRequest(body: [String: String]) async throws -> NanitTokens {
@@ -404,28 +423,6 @@ final class NanitAPIClient {
         }
 
         return "\(redacted.prefix(maxLength))... <truncated \(redacted.count - maxLength) chars>"
-    }
-
-    private static func withTimeout<T: Sendable>(
-        seconds: UInt64,
-        operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                throw NanitAPIError.transport("Nanit WebSocket request timed out.")
-            }
-
-            guard let result = try await group.next() else {
-                throw NanitAPIError.invalidResponse
-            }
-
-            group.cancelAll()
-            return result
-        }
     }
 }
 

@@ -61,6 +61,7 @@ build_args=(
   -derivedDataPath "$DERIVED_DATA"
   -clonedSourcePackagesDirPath "$DERIVED_DATA/SourcePackages"
   CLANG_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"
+  ENABLE_CODE_COVERAGE=NO
   build
 )
 
