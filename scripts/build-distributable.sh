@@ -18,6 +18,7 @@ NOTARY_KEYCHAIN_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-}"
 APPLE_ID="${APPLE_ID:-}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 APPLE_APP_PASSWORD="${APPLE_APP_PASSWORD:-}"
+NANIGHT_ANALYTICS_URL="${NANIGHT_ANALYTICS_URL:-}"
 
 usage() {
   cat <<EOF
@@ -38,6 +39,7 @@ Optional environment variables:
   DERIVED_DATA                     Build output root, defaults to build/DerivedData
   DIST_DIR                         Package output directory, defaults to dist
   ZIP_PATH                         Final zip path, defaults to dist/Nanight.zip
+  NANIGHT_ANALYTICS_URL             HTTPS endpoint for official releases; unset disables analytics
 EOF
 }
 
@@ -62,6 +64,7 @@ build_args=(
   -clonedSourcePackagesDirPath "$DERIVED_DATA/SourcePackages"
   CLANG_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"
   ENABLE_CODE_COVERAGE=NO
+  NANIGHT_ANALYTICS_URL="$NANIGHT_ANALYTICS_URL"
   build
 )
 

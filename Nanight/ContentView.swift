@@ -610,6 +610,7 @@ struct SettingsView: View {
     @ObservedObject var model: NanightAppModel
     @ObservedObject var updater: NanightUpdater
     @ObservedObject var globalShortcut: NanightGlobalShortcut
+    @ObservedObject private var analytics = NanightAnalytics.shared
     @State private var confirmClearHistory = false
 
     var body: some View {
@@ -748,6 +749,16 @@ struct SettingsView: View {
                 CheckForUpdatesButton(updater: updater)
                 Text("Updates install only when you choose to install and relaunch Nanight.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Privacy") {
+                Toggle("Share basic usage statistics", isOn: Binding(
+                    get: { analytics.sharingEnabled },
+                    set: { analytics.setSharingEnabled($0) }
+                ))
+                Text("Once a day while Nanight is running, share a random installation ID, app version, and macOS major version to help count active installations. Enabled by default; turn this off at any time. No camera, audio, activity history, or account data is sent. Records are kept for 90 days.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Diagnostics") {

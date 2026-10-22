@@ -38,6 +38,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         updater.start()
+        NanightAnalytics.shared.start()
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.statusItem = statusItem
 
@@ -61,7 +62,10 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification] {
             workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.model.interruptObservation() }
+                Task { @MainActor [weak self] in
+                    self?.model.interruptObservation()
+                    if name == NSWorkspace.didWakeNotification { NanightAnalytics.shared.checkIn() }
+                }
             })
         }
         globalShortcut.start { [weak self] in self?.toggleCameraVisibility() }
@@ -74,6 +78,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     func applicationWillTerminate(_ notification: Notification) {
+        NanightAnalytics.shared.stop()
         globalShortcut.stop()
     }
 

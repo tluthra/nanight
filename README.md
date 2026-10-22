@@ -29,6 +29,43 @@ You'll need Xcode in addition to the requirements above.
 
 Open `Nanight.xcodeproj`, select the **Nanight** scheme, and run the app.
 
+## Basic usage statistics
+
+Official release builds share basic usage statistics by default. Ordinary source
+builds have no analytics endpoint and send nothing. Turn off **Settings →
+Privacy → Share basic usage statistics** at any time to cancel pending requests
+and stop future sharing. Development builds and tests do not send analytics.
+
+Once per UTC day while Nanight is running, it sends a random
+installation ID, Nanight version, and macOS major version to Nanight's Cloudflare
+endpoint. The ID is generated locally and is unrelated to your Nanit account.
+No camera data, audio, activity history, credentials, or account details are sent.
+Only a successful server response completes the day's check-in. Failed attempts
+retry silently, with at least 15 minutes between attempts. Launch, wake, and network
+recovery check whether a ping is due, with a 15-minute timer as a fallback. No
+requests run while Nanight is quit, and missed days are not backfilled.
+
+The service stores the UTC date and those three fields for 90 days, then keeps
+only aggregate daily counts. It does not store IP addresses in the analytics
+database or log request bodies. Cloudflare processes network metadata to serve
+requests; the endpoint uses a transient IP hash for rate limiting. Counts represent
+participating installations, not individual people. Opting out stops future
+sharing; existing records expire on the normal retention schedule.
+
+Backend setup and dashboard instructions are in [analytics/README.md](analytics/README.md).
+
+For official releases, supply the endpoint explicitly when building:
+
+```sh
+NANIGHT_ANALYTICS_URL="https://nanight-analytics.tanooj-0dc.workers.dev/v1/ping" \
+./scripts/build-distributable.sh
+```
+
+Combine this variable with the signing and notarization options below. It also
+passes through `release-github.sh` when that script builds the app. Leaving it
+unset disables analytics, including in Release builds. Forks can supply their own
+endpoint. The URL is public configuration, not a secret or proof of an official build.
+
 ## Distribution
 
 <details>

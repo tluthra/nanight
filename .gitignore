@@ -39,3 +39,8 @@ Package.xcworkspace/
 # Local environment
 .env
 .env.*
+
+# Cloudflare analytics local dependencies, state, and secrets
+/analytics/node_modules/
+/analytics/.wrangler/
+/analytics/.dev.vars*
