@@ -64,7 +64,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 Task { @MainActor [weak self] in self?.model.interruptObservation() }
             })
         }
-        globalShortcut.start { [weak self] in self?.showCamera() }
+        globalShortcut.start { [weak self] in self?.toggleCameraVisibility() }
         installVideoGestureEventMonitor()
         NanightLog.gesture("BOOT revision=raw-events-v2 pid=\(ProcessInfo.processInfo.processIdentifier) app=\(Bundle.main.bundleURL.path)")
         DispatchQueue.main.async { [weak self] in
@@ -81,6 +81,19 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showCamera()
         return false
+    }
+
+    @MainActor
+    private func toggleCameraVisibility() {
+        if let floatingWindow, floatingWindow.isVisible {
+            floatingWindow.orderOut(nil)
+            videoGestureInput.reset()
+            model.setVideoVisible(false)
+        } else if let popover, popover.isShown {
+            popover.performClose(nil)
+        } else {
+            showCamera()
+        }
     }
 
     @MainActor
@@ -123,6 +136,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         if let floatingWindow {
             NSApp.activate(ignoringOtherApps: true)
             floatingWindow.makeKeyAndOrderFront(nil)
+            model.setVideoVisible(true)
             return
         }
 
@@ -224,7 +238,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     @MainActor
     private var activeVideoView: NSView? {
-        if let floatingWindow { return floatingWindow.contentViewController?.view }
+        if let floatingWindow { return floatingWindow.isVisible ? floatingWindow.contentViewController?.view : nil }
         return popover?.isShown == true ? popover?.contentViewController?.view : nil
     }
 

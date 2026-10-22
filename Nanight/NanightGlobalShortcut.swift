@@ -128,12 +128,12 @@ struct NanightShortcutSettings: View {
     var body: some View {
         Section("Keyboard Shortcut") {
             HStack {
-                Text("Show Nanight")
+                Text("Toggle Nanight")
                 Spacer()
                 Button(recording ? "Press shortcut…" : shortcut.shortcut.label) {
                     if recording { stopRecording() } else { startRecording() }
                 }
-                .accessibilityLabel("Show Nanight shortcut")
+                .accessibilityLabel("Toggle Nanight shortcut")
                 .accessibilityValue(recording ? "Recording" : shortcut.shortcut.label)
                 Button("Reset") {
                     stopRecording()
@@ -141,7 +141,7 @@ struct NanightShortcutSettings: View {
                 }
                 .disabled(shortcut.shortcut == .defaultShortcut)
             }
-            Text(recording ? "Press a key with Control, Option, or Command. Press Escape to cancel." : "Bring Nanight forward from any app while it is running.")
+            Text(recording ? "Press a key with Control, Option, or Command. Press Escape to cancel." : "Show or hide Nanight from any app while it is running.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let error = validationError ?? shortcut.error {

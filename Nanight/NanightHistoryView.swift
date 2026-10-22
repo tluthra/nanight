@@ -10,10 +10,11 @@ struct NanightHistoryView: View {
     @State private var loadedCamera: String?
     @State private var loading = false
     @State private var loadError: String?
-    @State private var hiddenKinds: Set<String> = []
+    @AppStorage("historyHiddenKinds") private var storedHiddenKinds = ""
     @Environment(\.colorScheme) private var scheme
 
     private var camera: String? { model.activeCamera?.uid }
+    private var hiddenKinds: Set<String> { Set(storedHiddenKinds.split(separator: ",").map(String.init)) }
     private var moon: Color { scheme == .dark ? Color(red: 0.93, green: 0.90, blue: 0.84) : Color(red: 0.28, green: 0.38, blue: 0.51) }
 
     var body: some View {
@@ -27,8 +28,8 @@ struct NanightHistoryView: View {
                 if compact { Button("View all history", action: openHistory).buttonStyle(.link) }
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { activityLegend; restLegend }.fixedSize()
-                VStack(alignment: .leading, spacing: 4) { activityLegend; restLegend }
+                HStack(spacing: 12) { activityLegend; restLegend; observationLegend }.fixedSize()
+                VStack(alignment: .leading, spacing: 6) { activityLegend; restLegend; observationLegend }
             }.font(.caption2)
             if let error = model.historyError ?? loadError {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -163,24 +164,38 @@ struct NanightHistoryView: View {
             legendButton("Sleeping", kind: "SLEEPING") {
                 Label("Sleeping", systemImage: "rectangle.fill").foregroundStyle(.cyan)
             }
-            Text("Shaded = observed").foregroundStyle(.secondary)
         }
+    }
+
+    private var observationLegend: some View {
+        Text("Shaded = observed").foregroundStyle(.secondary)
     }
 
     private func legendButton<Content: View>(_ title: String, kind: String, @ViewBuilder label: () -> Content) -> some View {
         let isVisible = !hiddenKinds.contains(kind)
+        let tint: Color = kind == "IN_BED" ? .mint : kind == "SLEEPING" ? .cyan : moon
         return Button {
-            if isVisible { hiddenKinds.insert(kind) }
-            else { hiddenKinds.remove(kind) }
+            var updated = hiddenKinds
+            if isVisible { updated.insert(kind) }
+            else { updated.remove(kind) }
+            storedHiddenKinds = updated.sorted().joined(separator: ",")
         } label: {
             label()
-                .opacity(isVisible ? 1 : 0.35)
-                .contentShape(Rectangle())
+                .opacity(isVisible ? 1 : 0.5)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(tint.opacity(isVisible ? 0.14 : 0), in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(isVisible ? tint.opacity(0.55) : Color.secondary.opacity(0.25), lineWidth: 1)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .help("\(isVisible ? "Hide" : "Show") \(title.lowercased()) in activity bars")
         .accessibilityLabel(title)
         .accessibilityValue(isVisible ? "Shown" : "Hidden")
+        .accessibilityAddTraits(isVisible ? .isSelected : [])
     }
 
     private var axis: some View {
