@@ -6,7 +6,7 @@ struct NanightApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(model: appDelegate.model, updater: appDelegate.updater)
+            SettingsView(model: appDelegate.model, updater: appDelegate.updater, globalShortcut: appDelegate.globalShortcut)
         }
         .commands {
             CommandGroup(after: .appInfo) {

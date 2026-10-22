@@ -15,6 +15,7 @@ enum NanightMenuBarIconState: Equatable {
 final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     @MainActor let model = NanightAppModel()
     @MainActor let updater = NanightUpdater()
+    @MainActor let globalShortcut = NanightGlobalShortcut()
     @MainActor private let videoInteraction = NanightVideoInteraction()
 
     private var statusItem: NSStatusItem?
@@ -63,11 +64,17 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 Task { @MainActor [weak self] in self?.model.interruptObservation() }
             })
         }
+        globalShortcut.start { [weak self] in self?.showCamera() }
         installVideoGestureEventMonitor()
         NanightLog.gesture("BOOT revision=raw-events-v2 pid=\(ProcessInfo.processInfo.processIdentifier) app=\(Bundle.main.bundleURL.path)")
         DispatchQueue.main.async { [weak self] in
             self?.showCamera()
         }
+    }
+
+    @MainActor
+    func applicationWillTerminate(_ notification: Notification) {
+        globalShortcut.stop()
     }
 
     @MainActor
@@ -565,7 +572,7 @@ final class NanightAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model, updater: updater)))
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model, updater: updater, globalShortcut: globalShortcut)))
             window.title = "Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false

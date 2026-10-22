@@ -609,6 +609,7 @@ private struct DisclaimerView: View {
 struct SettingsView: View {
     @ObservedObject var model: NanightAppModel
     @ObservedObject var updater: NanightUpdater
+    @ObservedObject var globalShortcut: NanightGlobalShortcut
     @State private var confirmClearHistory = false
 
     var body: some View {
@@ -645,6 +646,8 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            NanightShortcutSettings(shortcut: globalShortcut)
 
             Section("Monitoring") {
                 Toggle("Start monitoring on launch", isOn: $model.settings.startMonitoringOnLaunch)
