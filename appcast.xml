@@ -6,6 +6,18 @@
         <description>Stable releases of Nanight for macOS.</description>
         <language>en</language>
         <item>
+            <title>0.0.10</title>
+            <pubDate>Wed, 21 Oct 2026 22:35:48 -0700</pubDate>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>0.0.10</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[- Show or hide the camera from anywhere with a customizable global keyboard shortcut. The default is Control + Option + Command + N.
+- Clearer history filter buttons make it easier to see which activity types are shown.
+- History filter selections are now remembered across app restarts.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.10/Nanight.zip" length="70767994" type="application/octet-stream" sparkle:edSignature="Ay9sWFMBNEBeOVmfBfzTm+w4hg56LzZHU2y9fOkvNntqcCUIKRccefZsLbSvtEbFMuUjcuLyKPYE7aNIbgc4Bw=="/>
+        </item>
+        <item>
             <title>0.0.9</title>
             <pubDate>Mon, 21 Sep 2026 23:03:37 -0700</pubDate>
             <sparkle:version>12</sparkle:version>
@@ -35,16 +47,6 @@ Developer ID signed and notarized by Apple. Validated with 107 app tests and 11 
 - Prevent recursive popover resizing when rotating the camera.
 - Click Motion, Sound, In bed, or Sleeping in the activity legend to show or hide that track.]]></description>
             <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.8/Nanight.zip" length="71169968" type="application/octet-stream" sparkle:edSignature="Y0kLCSWatLg+0z9P7jHKlEyJUuNVfWffgzDQnxp9zDlds6B7f8upe1Uw4Ad9IVxJHqxFCKwQ9iEegsiGo7ywBg=="/>
-        </item>
-        <item>
-            <title>0.0.7</title>
-            <pubDate>Wed, 16 Sep 2026 10:47:10 -0700</pubDate>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>0.0.7</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="plain-text"><![CDATA[Adds local baby-presence detection, estimated sleep and activity history, and timelapse support. Presence and sleep indicators are estimates processed on your Mac.]]></description>
-            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.7/Nanight.zip" length="71148680" type="application/octet-stream" sparkle:edSignature="5S1LyuMbfLK2zz7eD4k60NI2oQd1UaJDnX71zzodIaasSsqBSSwQZPnm1Gp1w1gpDxalwLV4rMztyUuihinXCA=="/>
         </item>
     </channel>
 </rss>
