@@ -6,6 +6,16 @@
         <description>Stable releases of Nanight for macOS.</description>
         <language>en</language>
         <item>
+            <title>1.0.0</title>
+            <pubDate>Wed, 04 Nov 2026 21:44:16 -0800</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="plain-text"><![CDATA[Nanight 1.0.0 marks the first stable release. This release updates the version from 0.0.10 to 1.0.0 with no changes to app behavior.]]></description>
+            <enclosure url="https://github.com/tluthra/nanight/releases/download/v1.0.0/Nanight.zip" length="70767965" type="application/octet-stream" sparkle:edSignature="QZHUe2B57+05FLIzC9wkz0Wyrb6JaU/ml+VIKitCoGrVTD3ycJzSRPmgi4DJe+6NNyt0l9YkqjRK3o5b7I0mBw=="/>
+        </item>
+        <item>
             <title>0.0.10</title>
             <pubDate>Wed, 21 Oct 2026 22:35:48 -0700</pubDate>
             <sparkle:version>13</sparkle:version>
@@ -33,20 +43,6 @@
 
 Developer ID signed and notarized by Apple. Validated with 107 app tests and 11 release-validation tests.]]></description>
             <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.9/Nanight.zip" length="70718877" type="application/octet-stream" sparkle:edSignature="cSqu4nlXUNgSltAh73cbNL5a08WjaFU4ChU/yDatwdSyhQIPRK5YqUfmAq+3zOoueXyvAdmsQK9nrZzCEwQQAw=="/>
-        </item>
-        <item>
-            <title>0.0.8</title>
-            <pubDate>Thu, 17 Sep 2026 22:12:30 -0700</pubDate>
-            <sparkle:version>11</sparkle:version>
-            <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="plain-text"><![CDATA[Fixes and improvements
-
-- Fix dragging the pinned camera window.
-- Prevent recursive popover resizing when rotating the camera.
-- Click Motion, Sound, In bed, or Sleeping in the activity legend to show or hide that track.]]></description>
-            <enclosure url="https://github.com/tluthra/nanight/releases/download/v0.0.8/Nanight.zip" length="71169968" type="application/octet-stream" sparkle:edSignature="Y0kLCSWatLg+0z9P7jHKlEyJUuNVfWffgzDQnxp9zDlds6B7f8upe1Uw4Ad9IVxJHqxFCKwQ9iEegsiGo7ywBg=="/>
         </item>
     </channel>
 </rss>
