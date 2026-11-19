@@ -32,7 +32,51 @@
     .download:hover { background: #e6ebf3; transform: translateY(-2px); }
     .photo { width: min(100%, 1040px); margin: 64px auto 0; border: 1px solid #ffffff65; border-radius: 20px; background: #192435; box-shadow: 0 0 24px #ffffff18, 0 0 64px #ffffff0d, 0 30px 90px #0002; overflow: hidden; }
     .photo img { display: block; width: 100%; height: auto; }
+    .testimonials + .photo { margin-top: 16px; }
+    .testimonials { position: relative; display: flex; align-items: center; gap: 20px; max-width: 1040px; margin: 28px auto 0; overflow: hidden; padding: 12px 0; color: #bdc8d9; }
+    .testimonial-viewport { overflow: hidden; min-width: 0; }
+    .testimonial-track { display: flex; width: max-content; animation: drift 48s linear infinite; }
+    .testimonial-group { display: flex; flex-shrink: 0; align-items: center; gap: 40px; padding-right: 40px; }
+    .testimonial-group span { flex: 0 0 440px; width: 440px; white-space: normal; min-height: 3em; font-size: 14px; line-height: 1.5; }
+    .testimonial-group em { color: #e1e8f5; font-style: italic; }
+    .testimonials:hover .testimonial-track { animation-play-state: paused; }
+    @keyframes drift { to { transform: translateX(-50%); } }
+    .features { max-width: 1040px; margin: 96px auto 0; text-align: left; }
+    .features h2 { margin: 0; font-size: clamp(28px, 4vw, 36px); letter-spacing: -1px; text-align: center; }
+    .features-intro { margin: 14px auto 36px; color: #aeb8c9; font-size: 18px; line-height: 1.5; text-align: center; }
+    .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .feature { overflow: hidden; border: 1px solid #ffffff18; border-radius: 20px; background: #1a2638; }
+    .feature-visual { height: 210px; display: flex; align-items: center; justify-content: center; padding: 28px; background: radial-gradient(ellipse at center, #2c3d57, #1a2638 75%); }
+    .feature-copy { padding: 0 32px 32px; }
+    .feature h3 { margin: 0 0 10px; font-size: 22px; letter-spacing: -.4px; }
+    .feature p { margin: 0; color: #bdc8d9; font-size: 16px; line-height: 1.65; }
+    .shortcut-keys { display: flex; gap: 10px; }
+    .shortcut-keys kbd { display: grid; place-items: center; width: 62px; height: 64px; border: 1px solid #8190a6; border-bottom: 5px solid #52617a; border-radius: 12px; background: linear-gradient(#40506a, #2b394e); box-shadow: 0 8px 18px #0003; color: #eef3ff; font: 28px -apple-system, BlinkMacSystemFont, sans-serif; }
+    .gesture-demo { display: flex; align-items: center; justify-content: center; gap: 34px; width: 100%; color: #d5e2fa; }
+    .gesture { display: grid; justify-items: center; gap: 18px; font-size: 14px; }
+    .gesture svg { width: 48px; height: 48px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .notification-preview { width: 100%; max-width: 350px; display: flex; align-items: center; gap: 14px; border: 1px solid #ffffff30; border-radius: 16px; padding: 18px; background: #46536bc7; box-shadow: 0 14px 30px #0003; }
+    .notification-preview img { width: 44px; height: 44px; border-radius: 11px; }
+    .notification-preview strong, .notification-preview span { display: block; }
+    .notification-preview strong { margin: 5px 0 3px; font-size: 16px; }
+    .notification-preview span { font-size: 14px; color: #d1dbea; }
+    .notification-preview .notification-app { font-size: 12px; letter-spacing: 1px; }
+    .pin-desktop { position: relative; width: 280px; height: 150px; border: 1px solid #ffffff20; border-radius: 10px; background: #24334a; }
+    .work-window { position: absolute; inset: 20px 65px 16px 18px; padding: 28px 16px 12px; border: 1px solid #ffffff20; border-radius: 6px; background: #35445c; }
+    .work-window::before { content: '•••'; position: absolute; top: 0; left: 10px; color: #aeb8c9; letter-spacing: 3px; }
+    .work-window i { display: block; height: 4px; margin: 10px 0; background: #8596b34d; border-radius: 2px; }
+    .work-window i:nth-child(2) { width: 65%; }
+    .pinned-window { position: absolute; right: 12px; top: 42px; width: 116px; height: 84px; display: grid; place-items: center; border: 1px solid #bdcce3; border-radius: 8px; background: #162133; box-shadow: 0 8px 20px #0005; }
+    .pinned-window img { width: 48px; height: 48px; border-radius: 12px; }
+    .pinned-window svg { position: absolute; top: 7px; right: 8px; width: 14px; height: 14px; fill: none; stroke: #d5e2fa; stroke-width: 1.5; }
     @media (max-width: 600px) {
+      .features { margin-top: 64px; }
+      .feature-grid { grid-template-columns: 1fr; gap: 20px; }
+      .feature-copy { padding: 0 24px 28px; }
+      .feature-visual { height: 190px; padding: 24px; }
+      .shortcut-keys { gap: 8px; }
+      .shortcut-keys kbd { width: 52px; height: 58px; }
+      .gesture-demo { gap: 28px; }
       .github { top: 24px; right: 24px; }
       main { padding-top: 102px; }
       .logo { width: 104px; height: 104px; }
@@ -147,9 +191,68 @@
       <svg viewBox="0 0 24 28" fill="currentColor" aria-hidden="true"><path d="M18.7 14.8c0-3.1 2.5-4.6 2.6-4.7-1.4-2.1-3.6-2.4-4.4-2.4-1.9-.2-3.7 1.1-4.6 1.1-.9 0-2.4-1.1-3.9-1-2 .1-3.9 1.2-4.9 3-2.1 3.6-.5 8.9 1.5 11.8 1 1.4 2.1 3 3.6 2.9 1.5-.1 2-1 3.8-1 1.8 0 2.3 1 3.9 1 1.6 0 2.6-1.4 3.5-2.9 1.1-1.6 1.6-3.2 1.6-3.3-.1 0-2.7-1-2.7-4.5ZM15.7 5.8c.8-1 1.4-2.4 1.2-3.8-1.2.1-2.6.8-3.5 1.8-.8.9-1.5 2.3-1.3 3.6 1.3.1 2.7-.7 3.6-1.6Z"/></svg>
       Download for Mac
     </a>
+    <aside class="testimonials" aria-label="User testimonials">
+      <div class="testimonial-viewport"><div class="testimonial-track">
+        <div class="testimonial-group"><span><em>“Nanight has made it so much easier to sneak a quick glance at my [child] while i'm working”</em> – July A.</span><span><em>“This is what Nanit's app should have been”</em> – Shilpa D.</span><span><em>“Honestly surprised Nanit doesn't offer this themselves. It works exactly how you'd expect, and now I use it every day”</em> – Daniel R.</span><span><em>“Between work calls and a sleeping newborn, I was constantly switching between my laptop and my phone. Nanight made that one less thing to worry about.”</em> – Emily K</span></div>
+        <div class="testimonial-group" aria-hidden="true"><span><em>“Nanight has made it so much easier to sneak a quick glance at my [child] while i'm working”</em> – July A.</span><span><em>“This is what Nanit's app should have been”</em> – Shilpa D.</span><span><em>“Honestly surprised Nanit doesn't offer this themselves. It works exactly how you'd expect, and now I use it every day”</em> – Daniel R.</span><span><em>“Between work calls and a sleeping newborn, I was constantly switching between my laptop and my phone. Nanight made that one less thing to worry about.”</em> – Emily K</span></div>
+      </div>
+      </div>
+    </aside>
     <div class="photo">
       <img src="assets/nanight-desktop-cropped.jpg" alt="Nanight on a Mac desktop, showing a sleeping baby in the live camera view" width="932" height="549">
     </div>
+    <section class="features" aria-labelledby="features-heading">
+      <h2 id="features-heading">A little closer, while you work.</h2>
+      <p class="features-intro">Small touches that make checking in feel effortless.</p>
+      <div class="feature-grid">
+        <article class="feature">
+          <div class="feature-visual">
+            <div class="shortcut-keys" aria-label="Control Option Command N"><kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>N</kbd></div>
+          </div>
+          <div class="feature-copy">
+            <h3>One shortcut. A quick peek.</h3>
+            <p>Show or hide Nanight from anywhere on your Mac with Control + Option + Command + N. Prefer another combination? Make it yours in Settings.</p>
+          </div>
+        </article>
+        <article class="feature">
+          <div class="feature-visual" aria-hidden="true">
+            <div class="gesture-demo">
+              <div class="gesture"><svg viewBox="0 0 48 48"><circle cx="20" cy="20" r="13"/><path d="m30 30 12 12M14 20h12M20 14v12"/></svg><span>Zoom</span></div>
+              <div class="gesture"><svg viewBox="0 0 48 48"><path d="M24 5v38M5 24h38M18 11l6-6 6 6M18 37l6 6 6-6M11 18l-6 6 6 6M37 18l6 6-6 6"/></svg><span>Pan</span></div>
+              <div class="gesture"><svg viewBox="0 0 48 48"><path d="M39 19A16 16 0 1 0 39 30M39 7v12H27"/><rect x="18" y="18" width="12" height="12" rx="2" transform="rotate(-20 24 24)"/></svg><span>Rotate</span></div>
+            </div>
+          </div>
+          <div class="feature-copy">
+            <h3>Get just the right view.</h3>
+            <p>Pinch to zoom in, scroll to pan, and rotate with your trackpad. Take a closer look or adjust the angle without moving your camera.</p>
+          </div>
+        </article>
+        <article class="feature">
+          <div class="feature-visual" aria-hidden="true">
+            <div class="notification-preview">
+              <img src="assets/nanight.png" alt="" width="44" height="44" loading="lazy">
+              <div><span class="notification-app">NANIGHT</span><strong>Motion detected</strong><span>Nursery</span></div>
+            </div>
+          </div>
+          <div class="feature-copy">
+            <h3>A heads-up when things stir.</h3>
+            <p>Enable macOS notifications for motion and sound. Choose which alerts you want and how much time to leave between them.</p>
+          </div>
+        </article>
+        <article class="feature">
+          <div class="feature-visual" aria-hidden="true">
+            <div class="pin-desktop">
+              <div class="work-window"><i></i><i></i><i></i></div>
+              <div class="pinned-window"><img src="assets/nanight.png" alt="" width="48" height="48" loading="lazy"><svg viewBox="0 0 24 24"><path d="m9 3 6 0-1 6 4 4v2H6v-2l4-4-1-6ZM12 15v7"/></svg></div>
+            </div>
+          </div>
+          <div class="feature-copy">
+            <h3>Keep them in the picture.</h3>
+            <p>Pin the camera in a floating window that stays above your other apps. Move and resize it to fit the way you work.</p>
+          </div>
+        </article>
+      </div>
+    </section>
   </main>
 </body>
 </html>
